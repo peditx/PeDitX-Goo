@@ -200,13 +200,29 @@ pub fn apply_geometry(app: &AppHandle, pref: &str, collapsed: bool) {
     let x = mp.x + (ms.width as i32 - pw as i32) / 2;
     let y = mp.y;
 
-    let _ = win.set_size(PhysicalSize::new(pw, ph));
-    // Moving across displays can rescale the window: re-assert the physical size.
-    let _ = win.set_size(PhysicalSize::new(pw, ph));
-    // Position last, from the same lw/lh the sizes came from, so the two can
-    // never disagree however the window manager schedules the requests.
-    let _ = win.set_position(PhysicalPosition::new(x, y));
     let _ = win.set_always_on_top(true);
+    // Size and position reach the window manager as two separate requests, and
+    // it is free to apply them out of order — the island ended up 720 wide at
+    // the wake strip's x, a size from one call and a position from another.
+    // Ask, look at what came back, and ask again until the two agree.
+    for attempt in 0..8u32 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        let _ = win.set_size(PhysicalSize::new(pw, ph));
+        let _ = win.set_position(PhysicalPosition::new(x, y));
+        let size_ok = win
+            .outer_size()
+            .map(|s| s.width == pw && s.height == ph)
+            .unwrap_or(false);
+        let pos_ok = win
+            .outer_position()
+            .map(|p| p.x == x && p.y == y)
+            .unwrap_or(false);
+        if size_ok && pos_ok {
+            return;
+        }
+    }
 }
 
 /// Keeps the island out of Alt-Tab and stops a click on it stealing focus from
