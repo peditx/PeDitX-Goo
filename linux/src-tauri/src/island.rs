@@ -338,6 +338,15 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                 // take it back — the strip could then never deliver the hover that
                 // wakes the island again.
                 let accept = on_island || dragging || gate.collapsed.load(Ordering::Relaxed);
+                if ticks % 60 == 0 {
+                    crate::log::line(format!(
+                        "tick: xy=({x:.0},{y:.0}) rect=({},{},{},{}) collapsed={} active={} ignoring={}",
+                        r.x, r.y, r.w, r.h,
+                        gate.collapsed.load(Ordering::Relaxed),
+                        gate.is_active(),
+                        gate.ignoring.load(Ordering::Relaxed),
+                    ));
+                }
                 if gate.ignoring.load(Ordering::Relaxed) == accept {
                     gate.ignoring.store(!accept, Ordering::Relaxed);
                     let _ = win.set_ignore_cursor_events(!accept);

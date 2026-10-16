@@ -94,6 +94,9 @@ fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
     island::set_ignore_cursor(&app, false);
     shared.gate.forget_ignore_state();
     shared.gate.set_active(!collapsed);
+    crate::log::line(format!(
+        "set_collapsed: {collapsed} -> poll {}", if collapsed { "parked" } else { "running" }
+    ));
 }
 
 /// The front end pushes the island shape; Rust decides click-through from it.
@@ -101,6 +104,9 @@ fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
 fn set_island_rect(shared: State<Shared>, x: f64, y: f64, width: f64, height: f64) {
     shared.gate.set_rect(island::IslandRect { x, y, w: width, h: height });
     shared.gate.forget_ignore_state();
+    crate::log::line(format!(
+        "rect pushed: ({x:.0},{y:.0},{width:.0}x{height:.0})"
+    ));
 }
 
 #[tauri::command]
