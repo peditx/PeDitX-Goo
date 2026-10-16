@@ -1,0 +1,126 @@
+name: Linux
+
+# Builds PeDitX-Goo for Linux and packs the .deb and .rpm.
+# Triggered on every push (so a change can be verified without a local build —
+# nothing compiles on the dev machine), by tags like `linux-v0.1.0`, and by hand.
+
+on:
+  push:
+    branches: ['**']
+    tags:
+      - 'linux-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# A `linux-v*` tag publishes straight to peditx/PeDitX-Goo; every other run
+# still uploads the packages as an artifact, so a build can be inspected
+# without tagging anything. The workflow token only covers this compile repo,
+# so the publish step authenticates with the PAT stored as PEDITX_TOKEN.
+env:
+  PUBLISH: 'true'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: linux
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: linux/package-lock.json
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            linux/target
+          key: linux-cargo-${{ hashFiles('linux/Cargo.lock') }}
+          restore-keys: linux-cargo-
+
+      # Tauri's Linux build deps. libdbus-1-dev/pkg-config are for the Secret
+      # Service backend in keyring; everything else is Tauri's own list.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl wget file pkg-config \
+            libssl-dev libdbus-1-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The Rust tests are cheap and this port touched exactly the files they
+      # cover: endpoint URL handling, history translation, settings paths.
+      - name: Run the Rust tests
+        run: cargo test --workspace
+
+      # Three files carry the version and they drift silently. Publishing a
+      # "0.1.1" that installs a 0.1.0 is the kind of thing nobody notices until
+      # a bug report arrives against the wrong build.
+      - name: Check the tag and every version agree
+        if: startsWith(github.ref, 'refs/tags/linux-v')
+        run: |
+          tag="${GITHUB_REF_NAME#linux-v}"
+          conf=$(python3 -c "import json;print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          pkg=$(python3 -c "import json;print(json.load(open('package.json'))['version'])")
+          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "tag=$tag tauri.conf=$conf package.json=$pkg Cargo.toml=$cargo"
+          bad=""
+          [ "$tag" = "$conf" ]  || bad="$bad tauri.conf.json says $conf;"
+          [ "$tag" = "$pkg" ]   || bad="$bad package.json says $pkg;"
+          [ "$tag" = "$cargo" ] || bad="$bad Cargo.toml says $cargo;"
+          [ -z "$bad" ] || { echo "tag says $tag but $bad"; exit 1; }
+
+      # `npm run build` runs tsc first, tauri then bundles. `pack` copies the
+      # packages out of target/ under their shipping names.
+      - name: Build and pack the packages
+        id: pack
+        run: |
+          npm run pack
+          echo "version=$(python3 -c "import json;print(json.load(open('src-tauri/tauri.conf.json'))['version'])")" >> "$GITHUB_OUTPUT"
+          ls -l release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PeDitX-Goo-Linux-packages
+          path: |
+            linux/release/*.deb
+            linux/release/*.rpm
+
+      - name: Publish the release
+        if: env.PUBLISH == 'true' && startsWith(github.ref, 'refs/tags/linux-v')
+        env:
+          GH_TOKEN: ${{ secrets.PEDITX_TOKEN }}
+        run: |
+          v="${{ steps.pack.outputs.version }}"
+          notes="PeDitX-Goo for Linux $v — a companion at the top of your screen. Debian/Ubuntu: sudo apt install ./PeDitX-Goo-Linux-$v-amd64.deb — Fedora: sudo dnf install ./PeDitX-Goo-Linux-$v-x86_64.rpm"
+          # --latest=false is not cosmetic: without it GitHub hands "Latest" to
+          # whichever release was published last, and the site's Download for Mac
+          # button points at /releases/latest. The macOS `v*` releases own that slot.
+          # The release goes to the fork, not to this compile repo, and
+          # --target pins the tag to the commit that was actually built instead
+          # of the fork's default branch. Deleting first keeps a re-run of a
+          # green job from dying on "release already exists".
+          gh release delete "${GITHUB_REF_NAME}" \
+            --repo peditx/PeDitX-Goo --cleanup-tag --yes 2>/dev/null || true
+          gh release create "${GITHUB_REF_NAME}" \
+            "release/PeDitX-Goo-Linux-$v-amd64.deb" \
+            "release/PeDitX-Goo-Linux-$v-x86_64.rpm" \
+            --repo peditx/PeDitX-Goo \
+            --target "$GITHUB_SHA" \
+            --title "PeDitX-Goo for Linux $v" \
+            --notes "$notes" \
+            --latest=false

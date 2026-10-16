@@ -1,0 +1,18 @@
+# Build artefacts
+node_modules/
+dist/
+target/
+release/
+*.tsbuildinfo
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# iCloud stubs
+*.icloud
+
+# Local only (never published)
+.claude/
+_prive/

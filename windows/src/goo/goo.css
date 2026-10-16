@@ -1,0 +1,246 @@
+/* Full-screen chat — the palette is the island's, laid out as a window. */
+
+:root {
+  color-scheme: dark;
+
+  --font: system-ui, "Inter", "Cantarell", "Noto Sans", sans-serif;
+  --mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+  --ink: #f5f6f8;
+  --dim: #9398a1;
+  --dim-2: #6b7079;
+  --bg: #0b0c0e;
+  --card: #141518;
+  --hairline: rgba(255, 255, 255, 0.07);
+  --green: #22c55e;
+  --red: #f4505e;
+  --indigo: #6366f1;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body.goo-window {
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 15px/1.55 var(--font);
+  -webkit-font-smoothing: antialiased;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#goo-root {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.loading {
+  padding: 24px;
+  color: var(--dim);
+}
+
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--card);
+}
+
+header .title {
+  font: 600 15px var(--font);
+  letter-spacing: -0.01em;
+}
+
+header .status {
+  font: 400 12px var(--font);
+  color: var(--dim-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+header .status i.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+header .spacer {
+  flex: 1 1 auto;
+}
+
+button {
+  font: 500 13px var(--font);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  padding: 7px 13px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--indigo);
+  border-color: transparent;
+}
+
+button.primary:hover {
+  background: #7376f5;
+}
+
+/* ── Transcript ──────────────────────────────────────────────────────────── */
+
+main {
+  overflow-y: auto;
+  padding: 28px 0 12px;
+}
+
+.stream {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.msg .who {
+  font: 600 11px var(--font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim-2);
+}
+
+.msg.user .who {
+  color: var(--indigo);
+}
+
+.msg .body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg.user .body {
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 11px 14px;
+}
+
+.msg .body:empty::before {
+  content: "…";
+  color: var(--dim-2);
+}
+
+.notice {
+  font: 400 13px var(--font);
+  border-radius: 10px;
+  padding: 10px 13px;
+}
+
+.notice.err {
+  background: rgba(244, 80, 94, 0.12);
+  border: 1px solid rgba(244, 80, 94, 0.4);
+  color: #ffb4b9;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
+
+.empty {
+  max-width: 34rem;
+  margin: 12vh auto 0;
+  padding: 0 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+
+.empty h2 {
+  font: 600 20px var(--font);
+  letter-spacing: -0.015em;
+}
+
+.empty p {
+  color: var(--dim);
+  font: 400 14px/1.6 var(--font);
+}
+
+/* ── Composer ────────────────────────────────────────────────────────────── */
+
+footer {
+  border-top: 1px solid var(--hairline);
+  padding: 16px 24px 20px;
+  background: var(--bg);
+}
+
+.composer {
+  max-width: 46rem;
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 10px 10px 10px 14px;
+}
+
+.composer:focus-within {
+  border-color: rgba(99, 102, 241, 0.6);
+}
+
+.composer textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--ink);
+  font: 400 15px/1.5 var(--font);
+  max-height: 220px;
+}
+
+.composer textarea::placeholder {
+  color: var(--dim-2);
+}
+
+.send {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: var(--indigo);
+  border-color: transparent;
+}
+
+.send:hover {
+  background: #7376f5;
+}

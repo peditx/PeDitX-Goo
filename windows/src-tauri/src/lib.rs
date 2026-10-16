@@ -1,0 +1,391 @@
+// PeDitX-Goo for Windows — app wiring and the commands the island calls.
+
+mod backend;
+mod chat;
+mod files;
+mod hotkey;
+mod island;
+mod log;
+mod secrets;
+mod settings;
+mod tray;
+
+use std::os::windows::process::CommandExt;
+use std::process::Command;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+
+use serde::Serialize;
+use serde_json::Value;
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+
+use backend::GooEvent;
+use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
+
+use chat::{Chat, ChatContext, ChatReply};
+use files::DroppedFile;
+use island::{PollGate, ScreenInfo};
+use settings::Settings;
+
+/// Keeps spawned helpers from flashing a console window.
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+pub struct Shared {
+    pub settings: Mutex<Settings>,
+    pub gate: Arc<PollGate>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootInfo {
+    settings: Settings,
+    screen: ScreenInfo,
+    version: String,
+}
+
+#[tauri::command]
+fn boot(app: AppHandle, shared: State<Shared>) -> BootInfo {
+    let settings = shared.settings.lock().unwrap().clone();
+    let screen = island::screen_info(&app, &settings.screen);
+    BootInfo {
+        settings,
+        screen,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
+
+#[tauri::command]
+fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
+    let (screen_changed, autostart_changed, hotkey_changed) = {
+        let mut current = shared.settings.lock().unwrap();
+        let screen_changed = current.screen != settings.screen;
+        let autostart_changed = current.autostart != settings.autostart;
+        let hotkey_changed = current.hotkey != settings.hotkey
+            || current.hotkey_enabled != settings.hotkey_enabled;
+        *current = settings.clone();
+        (screen_changed, autostart_changed, hotkey_changed)
+    };
+    if let Err(err) = settings::save(&settings) {
+        eprintln!("[peditx-goo] could not save settings: {err}");
+    }
+    if autostart_changed {
+        let manager = app.autolaunch();
+        let result = if settings.autostart { manager.enable() } else { manager.disable() };
+        if let Err(err) = result {
+            eprintln!("[peditx-goo] autostart: {err}");
+        }
+    }
+    if screen_changed {
+        let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
+        island::apply_geometry(&app, &settings.screen, collapsed);
+    }
+    if hotkey_changed {
+        hotkey::update(&settings);
+    }
+    // Keep the other window in step (island ⇄ settings window).
+    let _ = app.emit("settings-changed", settings);
+}
+
+/// Hidden island → shrink the window to the invisible wake strip and park the
+/// cursor poll; anything else → full panel and 60 Hz polling.
+#[tauri::command]
+fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
+    let pref = shared.settings.lock().unwrap().screen.clone();
+    shared.gate.collapsed.store(collapsed, Ordering::Relaxed);
+    island::apply_geometry(&app, &pref, collapsed);
+    // The wake strip must always take the mouse, and a resize invalidates the flag.
+    island::set_ignore_cursor(&app, false);
+    shared.gate.forget_ignore_state();
+    shared.gate.set_active(!collapsed);
+}
+
+/// The front end pushes the island shape; Rust decides click-through from it.
+#[tauri::command]
+fn set_island_rect(shared: State<Shared>, x: f64, y: f64, width: f64, height: f64) {
+    shared.gate.set_rect(island::IslandRect { x, y, w: width, h: height });
+    shared.gate.forget_ignore_state();
+}
+
+#[tauri::command]
+fn focus_window(app: AppHandle, focused: bool) {
+    let Some(win) = island::window(&app) else { return };
+    island::set_activating(&win, focused);
+    if focused {
+        let _ = win.set_focus();
+    }
+}
+
+#[tauri::command]
+fn reposition(app: AppHandle, shared: State<Shared>) {
+    let pref = shared.settings.lock().unwrap().screen.clone();
+    let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
+    island::apply_geometry(&app, &pref, collapsed);
+}
+
+#[tauri::command]
+fn open_url(url: String) {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return;
+    }
+    // Arguments, never a shell string: a URL is untrusted input.
+    let _ = Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", &url])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+}
+
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+// ── Chat and secrets ─────────────────────────────────────────────────────────
+
+/// One island turn. The API key and any file bytes stay on the Rust side, and
+/// the model is read fresh so a change in Settings applies to the next message.
+#[tauri::command]
+async fn chat_send(
+    shared: State<'_, Shared>,
+    chat: State<'_, Chat>,
+    query: String,
+    context: Option<ChatContext>,
+) -> Result<ChatReply, String> {
+    let (url, model) = {
+        let s = shared.settings.lock().unwrap();
+        (s.backend_url.clone(), s.model.clone())
+    };
+    backend::chat(&url, &chat, model, query, context).await
+}
+
+#[tauri::command]
+fn chat_reset(chat: State<Chat>) {
+    chat.reset();
+}
+
+/// One streaming turn for the full-screen window. Deltas go over `channel`; the
+/// transcript is the window's to hold.
+#[tauri::command]
+async fn goo_send(
+    shared: State<'_, Shared>,
+    history: Vec<Value>,
+    prompt: String,
+    channel: Channel<GooEvent>,
+) -> Result<(), String> {
+    let (url, model) = {
+        let s = shared.settings.lock().unwrap();
+        (s.backend_url.clone(), s.model.clone())
+    };
+    backend::send(&url, history, model, prompt, channel).await
+}
+
+/// The chat window's empty state. Says "yes" or "no", never which half is
+/// missing — the settings window is where that is worked out.
+#[tauri::command]
+fn goo_configured(shared: State<Shared>) -> bool {
+    backend::configured(&shared.settings.lock().unwrap().backend_url)
+}
+
+/// `GET /models`. Doubles as the Settings "test connection" button: a returned
+/// list means the URL and the key are right, an error means they are not.
+#[tauri::command]
+async fn goo_models(shared: State<'_, Shared>) -> Result<Vec<String>, String> {
+    let url = shared.settings.lock().unwrap().backend_url.clone();
+    backend::models(&url).await
+}
+
+/// Copies a dropped file into the inbox and reports its name back.
+#[tauri::command]
+fn ingest_file(path: String) -> Result<DroppedFile, String> {
+    files::ingest(&path)
+}
+
+/// The island may only ask whether a value exists — never read it.
+#[tauri::command]
+fn secret_present(key: String) -> bool {
+    secrets::present(&key)
+}
+
+#[tauri::command]
+fn secret_set(key: String, value: String) -> Result<(), String> {
+    secrets::set(&key, &value)
+}
+
+#[tauri::command]
+fn secret_clear(key: String) -> Result<(), String> {
+    secrets::clear(&key)
+}
+
+/// Lets the island write to the same log as the Rust side.
+#[tauri::command]
+fn log_line(message: String) {
+    log::line(format!("ui  {message}"));
+}
+
+// ── Windows ──────────────────────────────────────────────────────────────────
+
+/// In a dev build the pages are served by Vite, so a second window needs the
+/// absolute dev URL; a bundled build resolves it inside the app bundle.
+fn page_url(app: &AppHandle, page: &str) -> WebviewUrl {
+    #[cfg(dev)]
+    if let Some(mut base) = app.config().build.dev_url.clone() {
+        base.set_path(&format!("/{page}"));
+        return WebviewUrl::External(base);
+    }
+    let _ = app;
+    WebviewUrl::App(page.into())
+}
+
+/// Hiding instead of closing, or the window could never be reopened.
+fn hide_on_close(win: &tauri::WebviewWindow) {
+    let hidden = win.clone();
+    win.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = hidden.hide();
+        }
+    });
+}
+
+/// WebView2 allows exactly one browser environment per app, and its options are
+/// fixed by whichever webview is created first. Every window must therefore ask
+/// for the *same* arguments as the island (see `additionalBrowserArgs` in
+/// tauri.conf.json) — a mismatch makes the second window come up blank, with no
+/// error anywhere.
+const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
+
+/// The settings window is created hidden at launch and only ever shown and
+/// hidden afterwards.
+fn create_settings_window(app: &AppHandle) {
+    let url = page_url(app, "settings.html");
+    match WebviewWindowBuilder::new(app, "settings", url)
+        .title("Settings — PeDitX-Goo")
+        .additional_browser_args(BROWSER_ARGS)
+        .inner_size(560.0, 680.0)
+        .min_inner_size(460.0, 480.0)
+        .resizable(true)
+        .visible(false)
+        .center()
+        .build()
+    {
+        Ok(win) => hide_on_close(&win),
+        Err(err) => log::line(format!("settings window failed: {err}")),
+    }
+}
+
+pub fn show_settings_window(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("settings") else {
+        log::line("settings window missing");
+        return;
+    };
+    let _ = win.unminimize();
+    let _ = win.show();
+    let _ = win.set_focus();
+}
+
+#[tauri::command]
+fn open_settings_window(app: AppHandle) {
+    show_settings_window(&app);
+}
+
+/// The full-screen chat. Maximised rather than exclusive-fullscreen: the user
+/// can still pull it off the screen edge, which matters on a tiling WM.
+fn create_goo_window(app: &AppHandle) {
+    let url = page_url(app, "goo.html");
+    match WebviewWindowBuilder::new(app, "goo", url)
+        .title("PeDitX-Goo")
+        .additional_browser_args(BROWSER_ARGS)
+        .inner_size(1180.0, 780.0)
+        .min_inner_size(720.0, 520.0)
+        .resizable(true)
+        .maximizable(true)
+        .maximized(true)
+        .visible(false)
+        .build()
+    {
+        Ok(win) => hide_on_close(&win),
+        Err(err) => log::line(format!("chat window failed: {err}")),
+    }
+}
+
+pub fn show_goo_window(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("goo") else {
+        log::line("chat window missing");
+        return;
+    };
+    let _ = win.unminimize();
+    let _ = win.show();
+    let _ = win.set_focus();
+}
+
+#[tauri::command]
+fn open_goo_window(app: AppHandle) {
+    show_goo_window(&app);
+}
+
+pub fn run() {
+    let loaded = settings::load();
+    let gate = Arc::new(PollGate::new());
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            let _ = app.emit_to(island::WINDOW_LABEL, "tray", "open".to_string());
+        }))
+        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
+        .manage(Shared {
+            settings: Mutex::new(loaded.clone()),
+            gate: gate.clone(),
+        })
+        .manage(Chat::default())
+        .invoke_handler(tauri::generate_handler![
+            boot,
+            save_settings,
+            set_collapsed,
+            set_island_rect,
+            focus_window,
+            reposition,
+            open_url,
+            quit_app,
+            log_line,
+            chat_send,
+            chat_reset,
+            goo_send,
+            goo_configured,
+            goo_models,
+            ingest_file,
+            secret_present,
+            secret_set,
+            secret_clear,
+            open_settings_window,
+            open_goo_window,
+        ])
+        .setup(move |app| {
+            let handle = app.handle().clone();
+            tray::build(&handle)?;
+            create_settings_window(&handle);
+            create_goo_window(&handle);
+
+            if let Some(win) = island::window(&handle) {
+                island::make_non_activating(&win);
+                island::apply_geometry(&handle, &loaded.screen, false);
+                let _ = win.show();
+            }
+            gate.collapsed.store(false, Ordering::Relaxed);
+            gate.set_active(true);
+            island::spawn_cursor_poll(handle.clone(), gate.clone());
+
+            log::line(format!("--- PeDitX-Goo {} started ---", env!("CARGO_PKG_VERSION")));
+            // Before the island: see create_settings_window.
+            hotkey::start(handle.clone(), &loaded);
+
+            // First run: no endpoint yet, so the window that sets one is the
+            // first thing the user sees. It stops happening the moment the
+            // address is saved, and never comes back.
+            if !backend::configured(&loaded.backend_url) {
+                show_settings_window(&handle);
+            }
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running PeDitX-Goo");
+}
