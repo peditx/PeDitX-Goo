@@ -304,6 +304,22 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                 }
                 last = (x, y);
 
+                // The whole panel takes the mouse while it is open. The island
+                // shape would be the finer answer, but it needs the cursor and
+                // the window in one coordinate frame, and on GNOME/Wayland they
+                // are not: the window position comes from Xwayland and the
+                // pointer may not, so the subtraction lands outside the shape
+                // and every click falls through to whatever is underneath.
+                // The window is the top strip of the screen, so the cost of
+                // taking all of it is the transparent band below the island —
+                // small next to not being able to click at all.
+                let open = !gate.collapsed.load(Ordering::Relaxed)
+                    && size.0 > 1.0
+                    && x >= -HIT_MARGIN
+                    && x <= size.0 + HIT_MARGIN
+                    && y >= -HIT_MARGIN
+                    && y <= size.1 + HIT_MARGIN;
+
                 // Click-through: the window only takes the mouse over the island
                 // shape. A small entry margin means the flag is already off by the
                 // time a moving cursor reaches a button.
@@ -337,7 +353,8 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                 // just before parking this thread, and an in-flight tick must not
                 // take it back — the strip could then never deliver the hover that
                 // wakes the island again.
-                let accept = on_island || dragging || gate.collapsed.load(Ordering::Relaxed);
+                let accept =
+                    on_island || open || dragging || gate.collapsed.load(Ordering::Relaxed);
                 if ticks % 60 == 0 {
                     crate::log::line(format!(
                         "tick: xy=({x:.0},{y:.0}) rect=({},{},{},{}) collapsed={} active={} ignoring={}",
