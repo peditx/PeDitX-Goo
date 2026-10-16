@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>PeDitX-Goo — character preview</title>
+    <style>
+      body { margin: 0; background: #131417; font: 12px system-ui; color: #ddd; }
+      #stage { display: block; margin: 0 auto; }
+      #label { text-align: center; font: 600 13px ui-monospace, monospace; padding: 8px 0; color: #9a9fa8; }
+      a { color: #6b8cff; }
+      nav { text-align: center; padding-bottom: 12px; }
+      nav a { margin: 0 6px; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <div id="label">–</div>
+    <canvas id="stage"></canvas>
+    <nav>
+      <a href="?state=idle">idle</a><a href="?state=working">working</a
+      ><a href="?state=thinking">thinking</a><a href="?state=error">error</a
+      ><a href="?state=finished">finished</a><a href="?state=sleeping">sleeping</a
+      ><a href="?state=dizzy">dizzy</a><a href="?state=approval">approval</a
+      ><a href="?state=question">question</a>
+    </nav>
+    <script type="module" src="./goo-preview.ts"></script>
+  </body>
+</html>

@@ -5,6 +5,7 @@
 // (design/prototype/notch-buddy.html, the visual source of truth) — the Swift
 // arc angles produce a different shape.
 
+import * as GOO from "./goo-art";
 import { Ease, lerp, type EaseFn } from "../core/anim";
 import { Sound } from "../core/sound";
 import type { BotEmoteName, BotStateName } from "../core/layout";
@@ -61,14 +62,8 @@ interface Particle {
 
 // ── Constants (GooConst / PISTES.goo) ─────────────────────────────────────
 
-const EYE_W = 0.25;
-const EYE_H = 0.27;
-const EYE_SP = 0.37;
-const EYE_P = -0.12;
 const BASE_TOP: RGB = [0.949, 0.965, 1]; // #F2F6FF
 const BASE_BOTTOM: RGB = [0.725, 0.8, 0.949]; // #B9CCF2
-const INK = "rgb(14,22,46)"; // #0E162E
-const MINI_INK = "rgb(14,22,46)"; // #0E162E
 
 const C = {
   idle: [0.902, 0.914, 0.933] as RGB,
@@ -656,24 +651,14 @@ export class BotEngine {
     x.scale(this.sx, this.sy);
 
     const body = this.bodyPath(rx, ry, R);
+    this.drawTufts(x, R);
     this.drawBody(x, body, R, rx, ry);
+    this.drawLimbs(x, R);
+    this.drawSparkles(x, R);
 
-    const blushVal = Math.max(this.blush, this.tint * 0.5) * (1 - this.morph);
-    if (blushVal > 0.01) {
-      x.save();
-      x.clip(body);
-      const yOffset = Math.sin(this.yaw) * rx * 0.8;
-      x.fillStyle = `rgba(255,120,150,${0.5 * blushVal})`;
-      for (const sd of [-1, 1]) {
-        x.beginPath();
-        x.ellipse(sd * rx * 0.55 + yOffset, ry * 0.2, R * 0.17, R * 0.1, 0, 0, Math.PI * 2);
-        x.fill();
-      }
-      x.restore();
-    }
-
-    this.drawEyes(x, body, R, rx, ry);
+    this.drawEyes(x, R);
     if (this.morph > 0.05) this.drawMouth(x, body, R);
+    if (this.morph <= 0.5) this.drawHeart(x, R);
 
     x.restore();
 
@@ -684,6 +669,11 @@ export class BotEngine {
   }
 
   private bodyPath(rx: number, ry: number, R: number): Path2D {
+    // ponytail: below half-swallowed the outline is the drawn character; past
+    // it, the old rounded-rect morph. A hard swap mid-swallow, masked by the
+    // mouth opening. Upgrade path: sample both outlines and lerp the radii.
+    if (this.morph <= 0.5) return GOO.bodyPath(R);
+
     const n = 72;
     const expN = 2.0 / 2.7;
     const tw = R * 1.0;
@@ -711,6 +701,74 @@ export class BotEngine {
     return p;
   }
 
+  /** Fur tufts — drawn first so they read as a fringe around the body. */
+  private drawTufts(x: CanvasRenderingContext2D, R: number) {
+    GOO.withArt(x, R, () => {
+      x.strokeStyle = GOO.FUR.tuft;
+      x.lineWidth = 7;
+      x.lineCap = "round";
+      for (const t of GOO.TUFTS) x.stroke(t);
+    });
+  }
+
+  /** Legs and feet, in front of the lower body exactly as in the source. */
+  private drawLimbs(x: CanvasRenderingContext2D, R: number) {
+    GOO.withArt(x, R, () => {
+      x.strokeStyle = GOO.FUR.leg;
+      x.lineWidth = 23;
+      x.lineCap = "round";
+      x.lineJoin = "round";
+      for (const l of GOO.LEGS) x.stroke(l);
+      x.fillStyle = GOO.FUR.foot;
+      for (const f of GOO.FEET) {
+        x.beginPath();
+        x.ellipse(f.x, f.y, f.rx, f.ry, 0, 0, Math.PI * 2);
+        x.fill();
+      }
+    });
+  }
+
+  private drawSparkles(x: CanvasRenderingContext2D, R: number) {
+    const a = Math.max(0.35, 1 - this.morph);
+    GOO.withArt(x, R, () => {
+      x.globalAlpha = a;
+      x.fillStyle = GOO.FUR.sparkle;
+      for (const s of GOO.SPARKLES) {
+        x.beginPath();
+        x.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        x.fill();
+      }
+      x.globalAlpha = 1;
+    });
+  }
+
+  /** The heart it hugs — beats while idle, gone once it has swallowed. */
+  private drawHeart(x: CanvasRenderingContext2D, R: number) {
+    const beat = 1 + Math.sin(now() * 3.2) * 0.025;
+    GOO.withArt(x, R, () => {
+      x.save();
+      const cx = 201;
+      const cy = 284;
+      x.translate(cx, cy);
+      x.scale(beat, beat);
+      x.translate(-cx, -cy);
+      const g = x.createLinearGradient(155, 241, 247, 326);
+      g.addColorStop(0, GOO.FUR.heart);
+      g.addColorStop(1, GOO.FUR.heartDeep);
+      x.fillStyle = g;
+      x.strokeStyle = GOO.FUR.heartEdge;
+      x.lineWidth = 3;
+      x.fill(GOO.HEART);
+      x.stroke(GOO.HEART);
+      x.strokeStyle = GOO.FUR.heartShine;
+      x.lineWidth = 5;
+      x.lineCap = "round";
+      x.stroke(GOO.HEART_SHINE);
+      x.fillStyle = GOO.FUR.claw;
+      for (const c of GOO.CLAWS) x.fill(c);
+    });
+  }
+
   private drawBody(x: CanvasRenderingContext2D, body: Path2D, R: number, rx: number, ry: number) {
     if (this.bodyColor) {
       // Mini bots: flat solid fill — no gradient, no reflection, no highlight
@@ -718,9 +776,17 @@ export class BotEngine {
       x.fill(body);
       return;
     }
-    const g = x.createLinearGradient(rx * 0.7, -ry * 0.85, -rx * 0.8, ry * 0.9);
-    g.addColorStop(0, rgba(BASE_TOP));
-    g.addColorStop(1, rgba(BASE_BOTTOM));
+    // assets/goo-character.svg: radialGradient cx 38% cy 28% r 75% over the
+    // body's own bounding box. SVG units, mapped into body-local ones — the
+    // path is already local, so filling it inside withArt would transform it
+    // a second time and send it off-canvas.
+    const g = x.createRadialGradient(
+      -0.239 * R, -0.514 * R, 0,
+      -0.239 * R, -0.514 * R, 1.633 * R,
+    );
+    g.addColorStop(0, GOO.FUR.inner);
+    g.addColorStop(0.55, GOO.FUR.mid);
+    g.addColorStop(1, GOO.FUR.outer);
     x.fillStyle = g;
     x.fill(body);
 
@@ -747,149 +813,119 @@ export class BotEngine {
     x.fill(body);
   }
 
-  private drawEyes(x: CanvasRenderingContext2D, body: Path2D, R: number, rx: number, ry: number) {
-    let shape: EyeShape = this.eyeOverride ?? this.cfg.eye;
-    if (this.morph > 0.5) {
-      if (this.isChewing) shape = "happy";
-      else if (this.slotHTarget > 0.05 || this.slotH > 0.1) shape = "cup";
-    }
+  /**
+   * The face — the drawing's own eyes, blush and smile, not the generic pill
+   * eyes. The engine still owns what moves them: `es` blinks them, `yaw`/
+   * `pitch` follow the cursor, and `cfg.eye` picks a shape per state.
+   */
+  private drawEyes(x: CanvasRenderingContext2D, R: number) {
+    const shape: EyeShape = this.eyeOverride ?? this.cfg.eye;
 
-    x.save();
-    x.clip(body);
-    const ink = this.isMini ? MINI_INK : INK;
-    x.fillStyle = ink;
-    x.strokeStyle = ink;
+    GOO.withArt(x, R, () => {
+      const E = GOO.EYES;
+      // One non-finite tween value here would silently erase the whole face: a
+      // path built from NaN fills nothing and raises nothing.
+      const es = Number.isFinite(this.es) && this.es > 0 ? this.es : 1;
+      const closed = shape === "closed" || shape === "flat" || shape === "line";
+      let rxS = 1;
+      let ryS = es;
+      if (closed) ryS = 0.06;
+      else if (shape === "wide") { rxS = 1.25; ryS = Math.max(ryS, 1.15); }
+      else if (shape === "tired") ryS = Math.min(ryS, 0.45);
+      else if (shape === "dot") { rxS = 0.55; ryS = 0.55; }
 
-    for (const sd of [-1, 1]) {
-      const eyeYaw = sd * EYE_SP + this.yaw;
-      let eyePitch = EYE_P + this.pitch + this.roll;
-      eyePitch = (((eyePitch + Math.PI) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
-      const cp = Math.cos(eyePitch);
-      if (Math.cos(eyeYaw) * cp <= 0.04) continue;
+      // Blink and cursor tracking, in SVG units.
+      const off = 18;
+      const ox = Number.isFinite(this.yaw) ? this.yaw * off : 0;
+      const oy = Number.isFinite(this.pitch) ? this.pitch * off * 0.6 : 0;
+      const halfW = GOO.BODY_HALF.x;
+      const O = GOO.BODY_ORIGIN;
 
-      const ex = Math.sin(eyeYaw) * cp * rx;
-      const ey = -Math.sin(eyePitch) * ry + (this.morph > 0 ? ry * 0.14 * this.morph : 0);
-      const fx = lerp(Math.max(0.18, Math.cos(eyeYaw)), 1, this.morph * 0.7);
-      const fy = lerp(Math.max(0.18, cp), 1, this.morph * 0.7);
-      const eyeMult = this.isMini ? 1.9 : 1.0;
-      const ew = R * EYE_W * this.es * eyeMult;
-      const eh = R * EYE_H * this.es * eyeMult;
-
-      x.save();
-      x.translate(ex, ey);
-      x.scale(fx, fy);
-      this.drawEyeShape(x, shape, ew, eh, sd, ink);
-      x.restore();
-    }
-    x.restore();
-  }
-
-  private drawEyeShape(
-    x: CanvasRenderingContext2D, shape: EyeShape,
-    w: number, h: number, sd: number, ink: string,
-  ) {
-    const t = now();
-    switch (shape) {
-      case "wide":
-        this.drawEyeShape(x, "pill", w * 1.16, h * 1.12, sd, ink);
-        break;
-      case "pill": {
-        const hh = Math.max(h * this.open, w * 0.3);
-        roundRectPath(x, -w / 2, -hh / 2, w, hh, Math.min(w / 2, hh / 2));
-        x.fill();
-        break;
-      }
-      case "dot":
-        x.beginPath();
-        x.arc(0, 0, w * 0.45, 0, Math.PI * 2);
-        x.fill();
-        break;
-      case "line":
-        x.rotate(-sd * 0.2);
-        roundRectPath(x, -w * 0.78, -w * 0.21, w * 1.56, w * 0.42, w * 0.21);
-        x.fill();
-        break;
-      case "flat":
-        roundRectPath(x, -w * 0.72, -w * 0.2, w * 1.44, w * 0.4, w * 0.2);
-        x.fill();
-        break;
-      case "happy":
-        x.lineWidth = w * 0.5;
-        x.lineCap = "round";
-        x.beginPath();
-        x.arc(0, h * 0.18, w * 0.82, Math.PI * 1.12, Math.PI * 1.88);
-        x.stroke();
-        break;
-      case "closed":
-        x.lineWidth = w * 0.36;
-        x.lineCap = "round";
-        x.beginPath();
-        x.arc(0, -h * 0.08, w * 0.78, Math.PI * 0.15, Math.PI * 0.85);
-        x.stroke();
-        break;
-      case "spiral": {
-        x.lineWidth = w * 0.22;
-        x.lineCap = "round";
-        x.beginPath();
-        for (let a = 0; a < 4.4 * Math.PI; a += 0.2) {
-          const r = w * 0.06 + a * w * 0.058;
-          const aa = a + t * 9 * sd;
-          const px = Math.cos(aa) * r;
-          const py = Math.sin(aa) * r;
-          if (a === 0) x.moveTo(px, py);
-          else x.lineTo(px, py);
-        }
-        x.stroke();
-        break;
-      }
-      case "heart":
-        x.fillStyle = "#FF4D6D";
-        heartPath(x, w * 1.2);
-        x.fill();
-        x.fillStyle = ink;
-        break;
-      case "star":
-        x.fillStyle = "#F7B32B";
-        x.rotate(t * 1.5 * sd);
-        starPath(x, w * 1.05, w * 0.46);
-        x.fill();
-        x.fillStyle = ink;
-        break;
-      case "tired":
-        roundRectPath(x, -w / 2, -h * 0.02, w, h * 0.38, w / 2);
-        x.fill();
-        roundRectPath(x, -w * 0.62, -h * 0.1, w * 1.24, w * 0.22, w * 0.11);
-        x.fill();
-        break;
-      case "wink":
-        if (sd < 0) {
-          const hh = Math.max(h * this.open, w * 0.3);
-          roundRectPath(x, -w / 2, -hh / 2, w, hh, Math.min(w / 2, hh / 2));
-          x.fill();
-        } else {
-          x.lineWidth = w * 0.5;
+      x.fillStyle = GOO.FUR.eye;
+      x.strokeStyle = GOO.FUR.eye;
+      for (const sd of [-1, 1]) {
+        const ex = O.x + sd * E.dx * halfW + ox;
+        const ey = O.y + E.dy * halfW + oy;
+        const w = E.rx * halfW * rxS;
+        const h = E.ry * halfW * ryS;
+        if (h < 1) continue;
+        if (shape === "happy" && ryS > 0.6) {
+          x.lineWidth = 5;
           x.lineCap = "round";
           x.beginPath();
-          x.arc(0, h * 0.18, w * 0.82, Math.PI * 1.12, Math.PI * 1.88);
+          x.arc(ex, ey + h * 0.35, w, Math.PI * 1.12, Math.PI * 1.88);
           x.stroke();
+        } else if (shape === "heart" || shape === "star") {
+          x.beginPath();
+          if (shape === "heart") {
+            const hr = w * 1.15;
+            x.moveTo(ex, ey + hr * 0.75);
+            x.bezierCurveTo(ex - hr * 1.3, ey - hr * 0.1, ex - hr * 0.55, ey - hr * 0.95, ex, ey - hr * 0.3);
+            x.bezierCurveTo(ex + hr * 0.55, ey - hr * 0.95, ex + hr * 1.3, ey - hr * 0.1, ex, ey + hr * 0.75);
+          } else {
+            for (let i = 0; i < 10; i++) {
+              const a = (Math.PI / 5) * i - Math.PI / 2;
+              const rr = i % 2 === 0 ? w * 1.1 : w * 0.46;
+              const px = ex + Math.cos(a) * rr;
+              const py = ey + Math.sin(a) * rr;
+              if (i === 0) x.moveTo(px, py);
+              else x.lineTo(px, py);
+            }
+            x.closePath();
+          }
+          x.fill();
+        } else if (shape === "spiral") {
+          x.lineWidth = 3;
+          x.beginPath();
+          for (let a = 0; a < Math.PI * 4; a += 0.2) {
+            const rr = (a / (Math.PI * 4)) * w;
+            const px = ex + Math.cos(a) * rr;
+            const py = ey + Math.sin(a) * rr;
+            if (a === 0) x.moveTo(px, py);
+            else x.lineTo(px, py);
+          }
+          x.stroke();
+        } else {
+          x.beginPath();
+          x.ellipse(ex, ey, w, h, 0, 0, Math.PI * 2);
+          x.fill();
+          // The white catchlight, offset with the eye.
+          x.fillStyle = "#fff";
+          x.beginPath();
+          x.arc(ex + w * 0.27, ey - h * 0.33, Math.max(1.5, w * 0.32), 0, Math.PI * 2);
+          x.fill();
+          x.fillStyle = GOO.FUR.eye;
         }
-        break;
-      case "cup": {
-        // Flat top, rounded bottom corners (U shape) — used while the box is open
-        const hh = Math.max(h * this.open, w * 0.3);
-        const cr = Math.min(w / 2, hh / 2);
-        x.beginPath();
-        x.moveTo(-w / 2, -hh / 2);
-        x.lineTo(w / 2, -hh / 2);
-        x.lineTo(w / 2, hh / 2 - cr);
-        x.quadraticCurveTo(w / 2, hh / 2, w / 2 - cr, hh / 2);
-        x.lineTo(-w / 2 + cr, hh / 2);
-        x.quadraticCurveTo(-w / 2, hh / 2, -w / 2, hh / 2 - cr);
-        x.closePath();
-        x.fill();
-        break;
       }
-    }
+
+      // Blush.
+      const blushA = Math.max(0.7, this.blush, this.tint * 0.5) * (1 - this.morph);
+      if (blushA > 0.01) {
+        x.globalAlpha = 0.8 * blushA;
+        x.fillStyle = GOO.FUR.blush;
+        for (const sd of [-1, 1]) {
+          x.beginPath();
+          x.ellipse(O.x + sd * GOO.BLUSH.dx * halfW + ox,
+            O.y + GOO.BLUSH.dy * halfW + oy,
+            GOO.BLUSH.rx * halfW, GOO.BLUSH.ry * halfW, 0, 0, Math.PI * 2);
+          x.fill();
+        }
+        x.globalAlpha = 1;
+      }
+
+      // The smile. `closed` and `tired` pull it flat; the rest keep it.
+      const M = GOO.MOUTH;
+      const smileY = closed || shape === "tired" ? 0.35 : 1;
+      x.strokeStyle = GOO.FUR.mouth;
+      x.lineWidth = 4;
+      x.lineCap = "round";
+      x.beginPath();
+      const mx = O.x + M.dx * halfW + ox;
+      const my = O.y + M.dy * halfW + oy;
+      x.moveTo(mx + M.dx1 * halfW, my);
+      x.quadraticCurveTo(mx + (M.dx1 + M.dx2) / 2 * halfW, my + M.bow * halfW * smileY, mx + M.dx2 * halfW, my);
+      x.stroke();
+    });
   }
 
   /** Mailbox slot: dark pill cut into the box face, with rim and lip highlights. */
