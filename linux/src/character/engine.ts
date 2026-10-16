@@ -916,14 +916,14 @@ export class BotEngine {
       // The smile. `closed` and `tired` pull it flat; the rest keep it.
       const M = GOO.MOUTH;
       const smileY = closed || shape === "tired" ? 0.35 : 1;
+      const mx = O.x + M.dx * halfW + ox;
+      const my = O.y + M.dy * halfW + oy;
       x.strokeStyle = GOO.FUR.mouth;
       x.lineWidth = 4;
       x.lineCap = "round";
       x.beginPath();
-      const mx = O.x + M.dx * halfW + ox;
-      const my = O.y + M.dy * halfW + oy;
-      x.moveTo(mx + M.dx1 * halfW, my);
-      x.quadraticCurveTo(mx + (M.dx1 + M.dx2) / 2 * halfW, my + M.bow * halfW * smileY, mx + M.dx2 * halfW, my);
+      x.moveTo(mx - M.hw * halfW, my);
+      x.quadraticCurveTo(mx, my + M.bow * halfW * smileY, mx + M.hw * halfW, my);
       x.stroke();
     });
   }

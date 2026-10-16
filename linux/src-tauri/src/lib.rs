@@ -265,6 +265,9 @@ pub fn show_settings_window(app: &AppHandle) {
     };
     let _ = win.unminimize();
     let _ = win.show();
+    // The island's setup does the same: .center() ran while the window was
+    // still hidden, and the window manager places it itself on map.
+    let _ = win.center();
     let _ = win.set_focus();
 }
 
@@ -299,6 +302,9 @@ pub fn show_goo_window(app: &AppHandle) {
     };
     let _ = win.unminimize();
     let _ = win.show();
+    // The island's setup does the same: .center() ran while the window was
+    // still hidden, and the window manager places it itself on map.
+    let _ = win.center();
     let _ = win.set_focus();
 }
 
@@ -353,6 +359,11 @@ pub fn run() {
                 island::make_non_activating(&win);
                 island::apply_geometry(&handle, &loaded.screen, false);
                 let _ = win.show();
+                // mutter — and most window managers — place a window when it is
+                // mapped, so a position asked for before show() is discarded and
+                // the island lands wherever the WM chose (the right half of the
+                // screen, on GNOME/X11). Ask again now that it is on screen.
+                island::apply_geometry(&handle, &loaded.screen, false);
             }
             gate.collapsed.store(false, Ordering::Relaxed);
             gate.set_active(true);
