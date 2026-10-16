@@ -179,7 +179,14 @@ pub fn screen_info(app: &AppHandle, pref: &str) -> ScreenInfo {
 }
 
 /// Places and sizes the window. `collapsed` picks the wake strip instead of the panel.
+/// Serialises the geometry writes. Hiding and revealing the island are two
+/// calls a few milliseconds apart, and interleaving them leaves the window
+/// with one call's size and the other's position — the island sat 720 wide at
+/// the wake strip's x, where only a 240-wide window belongs.
+static GEOM_LOCK: Mutex<()> = Mutex::new(());
+
 pub fn apply_geometry(app: &AppHandle, pref: &str, collapsed: bool) {
+    let _g = GEOM_LOCK.lock();
     let Some(win) = window(app) else { return };
     let Some(m) = target_monitor(app, pref) else { return };
 
@@ -194,9 +201,11 @@ pub fn apply_geometry(app: &AppHandle, pref: &str, collapsed: bool) {
     let y = mp.y;
 
     let _ = win.set_size(PhysicalSize::new(pw, ph));
-    let _ = win.set_position(PhysicalPosition::new(x, y));
     // Moving across displays can rescale the window: re-assert the physical size.
     let _ = win.set_size(PhysicalSize::new(pw, ph));
+    // Position last, from the same lw/lh the sizes came from, so the two can
+    // never disagree however the window manager schedules the requests.
+    let _ = win.set_position(PhysicalPosition::new(x, y));
     let _ = win.set_always_on_top(true);
 }
 
