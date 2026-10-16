@@ -287,6 +287,9 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                 // the window flag alone so a pointerless session never eats a
                 // click it cannot attribute to the island.
                 let Some((cx, cy)) = cursor_physical(&app) else {
+                    if ticks % 32 == 0 {
+                        crate::log::line("hit: no cursor position".to_string());
+                    }
                     std::thread::sleep(Duration::from_millis(500));
                     continue;
                 };
@@ -338,6 +341,12 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                 if gate.ignoring.load(Ordering::Relaxed) == accept {
                     gate.ignoring.store(!accept, Ordering::Relaxed);
                     let _ = win.set_ignore_cursor_events(!accept);
+                    // Only on the flip: this is what says whether a click will
+                    // land here or fall through, and it is rare enough to log.
+                    crate::log::line(format!(
+                        "click-through {accept}: cursor=({cx:.0},{cy:.0}) origin=({},{}) scale={scale} xy=({x:.0},{y:.0}) size=({:.0},{:.0}) rect=({},{},{},{})",
+                        origin.x, origin.y, size.0, size.1, r.x, r.y, r.w, r.h,
+                    ));
                 }
 
                 let _ = win.emit("cursor", CursorPayload { x, y });
