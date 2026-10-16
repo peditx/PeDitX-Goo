@@ -255,7 +255,8 @@ fn hide_on_close(win: &tauri::WebviewWindow) {
 const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
 
 /// The settings window is created hidden at launch and only ever shown and
-/// hidden afterwards.
+/// hidden afterwards. It must exist **before** the island's webview does: a
+/// WebView2 window created later comes up blank, with no error anywhere.
 fn create_settings_window(app: &AppHandle) {
     let url = page_url(app, "settings.html");
     match WebviewWindowBuilder::new(app, "settings", url)
@@ -362,6 +363,7 @@ pub fn run() {
         .setup(move |app| {
             let handle = app.handle().clone();
             tray::build(&handle)?;
+            // Before the island: see create_settings_window.
             create_settings_window(&handle);
             create_goo_window(&handle);
 
@@ -375,7 +377,6 @@ pub fn run() {
             island::spawn_cursor_poll(handle.clone(), gate.clone());
 
             log::line(format!("--- PeDitX-Goo {} started ---", env!("CARGO_PKG_VERSION")));
-            // Before the island: see create_settings_window.
             hotkey::start(handle.clone(), &loaded);
 
             // First run: no endpoint yet, so the window that sets one is the

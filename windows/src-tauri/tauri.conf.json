@@ -54,16 +54,13 @@
     "category": "DeveloperTool",
     "shortDescription": "A little companion at the top of your screen",
     "longDescription": "PeDitX-Goo puts a small animated companion at the top of your screen and chats with any OpenAI-compatible endpoint you point it at \u2014 9Router, PeDitX-AI, or a service on your own LAN. No telemetry, no account; the key lives in the Windows Credential Manager.",
-    "linux": {
-      "deb": {
-        "section": "utils"
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "English"
+        ]
       }
-    },
-    "nsis": {
-      "installMode": "currentUser",
-      "languages": [
-        "English"
-      ]
     }
   }
 }
