@@ -11,16 +11,18 @@ import type { ViewHost } from "./views";
 
 let nextId = 1;
 
-/** One message, as the island draws it. Shared with the drop view. */
+/** One message, as the island draws it. Shared with the drop view.
+ *  `dir="auto"` per message: Persian reads right-to-left, English the other
+ *  way, and a mixed line comes out right without the page flipping. */
 export function bubble(message: ChatMessage): HTMLElement {
   if (message.role === "user") {
     return h(
       "div",
       { class: "chat-row user" },
-      h("div", { class: "bubble", text: message.content }),
+      h("div", { class: "bubble", text: message.content, dir: "auto" }),
     );
   }
-  return h("div", { class: "chat-row" }, h("div", { class: "reply", text: message.content }));
+  return h("div", { class: "chat-row" }, h("div", { class: "reply", text: message.content, dir: "auto" }));
 }
 
 function typingDots(): HTMLElement {
@@ -46,6 +48,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     class: "chat-input",
     placeholder: "Ask me anything…",
     spellcheck: "false",
+    dir: "auto",
   }) as HTMLInputElement;
   const send = h("button", { class: "send-btn", title: "Send" }, svg(ICONS.arrowUp, 11));
   const newBtn = h("button", { class: "link-btn chat-link", title: "New chat", text: "New chat" });

@@ -185,7 +185,7 @@ function buildOverview(actions: ViewActions): ViewHost {
     const recent = history.slice(-4);
     for (const msg of recent) {
       const row = h("div", { class: `overview-msg ${msg.role === "user" ? "user" : ""}` });
-      const bubble = h("div", { class: "overview-bubble", text: msg.content });
+      const bubble = h("div", { class: "overview-bubble", text: msg.content, dir: "auto" });
       if (msg.role === "user") {
         row.style.justifyContent = "flex-end";
         row.append(bubble);
