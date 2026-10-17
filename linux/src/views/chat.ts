@@ -48,7 +48,9 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     spellcheck: "false",
   }) as HTMLInputElement;
   const send = h("button", { class: "send-btn", title: "Send" }, svg(ICONS.arrowUp, 11));
-  const bar = h("div", { class: "chat-bar" }, input, send);
+  const newBtn = h("button", { class: "link-btn chat-link", title: "New chat", text: "New chat" });
+  const openBtn = h("button", { class: "link-btn chat-link", title: "Open the full-screen chat", text: "Open chat" });
+  const bar = h("div", { class: "chat-bar" }, input, newBtn, openBtn, send);
 
   const el = h(
     "div",
@@ -113,6 +115,26 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   }
 
   send.addEventListener("click", () => void submit());
+
+  // A fresh session: the transcript, the file context and the Rust-side copy
+  // all go together — half a history is worse than none.
+  newBtn.addEventListener("click", () => {
+    if (sending) return;
+    State.chatHistory = [];
+    State.droppedFile = null;
+    State.promptContext = null;
+    State.stateOverride = null;
+    void Bridge.chatReset();
+    Sound.play("blip");
+    State.notify();
+    onHeightChange();
+    input.focus();
+  });
+
+  openBtn.addEventListener("click", () => {
+    Sound.play("blip");
+    void Bridge.openGooWindow();
+  });
   input.addEventListener("keydown", (e) => {
     if ((e as KeyboardEvent).key === "Enter") {
       e.preventDefault();
@@ -144,6 +166,8 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
 
       input.placeholder = State.chatHistory.length === 0 ? "Ask me anything…" : "Continue…";
       input.disabled = sending;
+      // Nothing to reset yet — the button only makes sense mid-conversation.
+      newBtn.disabled = sending || State.chatHistory.length === 0;
     },
     focus() {
       input.focus();

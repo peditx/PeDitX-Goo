@@ -969,6 +969,25 @@ input[type="range"]::-webkit-slider-thumb {
   transform: scale(0.94);
 }
 
+/* New chat / Open chat, beside the send button. */
+.chat-link {
+  flex: 0 0 auto;
+  color: var(--dim-2);
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
+}
+
+.chat-link:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--ink);
+}
+
+.chat-link:disabled {
+  opacity: 0.35;
+}
+
 /* ── Drop zone ──────────────────────────────────────────────────────────── */
 
 /* ── Drop view: the zone, and the conversation it is feeding ─────────────── */
