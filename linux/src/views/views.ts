@@ -276,7 +276,7 @@ function buildEmpty(actions: ViewActions): ViewHost {
 
 function buildQuestion(): ViewHost {
   const who = h("div");
-  const title = h("div", { class: "title" });
+  const title = h("div", { class: "title", dir: "auto" });
   const row = h("div", { class: "actions" });
   const el = h("div", { class: "view" }, card("cyan", stack(116, 16, who, title, row)));
   return {
@@ -297,7 +297,7 @@ function buildQuestion(): ViewHost {
 function buildError(actions: ViewActions): ViewHost {
   const who = h("div");
   const title = h("div", { class: "title", text: "That didn't go through." });
-  const detail = h("div", { class: "detail" });
+  const detail = h("div", { class: "detail", dir: "auto" });
   const row = h("div", { class: "actions" },
     btn("Retry", "primary", () => actions.setView(State.defaultView())),
     btn("Settings", "secondary", () => actions.openSettingsWindow()),
@@ -318,7 +318,7 @@ function buildError(actions: ViewActions): ViewHost {
 
 function buildFinished(actions: ViewActions): ViewHost {
   const who = h("div");
-  const title = h("div", { class: "title" });
+  const title = h("div", { class: "title", dir: "auto" });
   const row = h("div", { class: "actions" },
     btn("Open chat", "primary", () => actions.openChat()),
     btn("OK", "secondary", () => actions.collapse()),
@@ -349,7 +349,7 @@ function buildConfused(): ViewHost {
 // ── Note ──────────────────────────────────────────────────────────────────────
 
 function buildNote(): ViewHost {
-  const title = h("div", { class: "title" });
+  const title = h("div", { class: "title", dir: "auto" });
   const el = h("div", { class: "view" }, card(null, h("div", { class: "stack", style: "padding:0 18px 0 98px" }, title)));
   return {
     el,

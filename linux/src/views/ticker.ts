@@ -35,10 +35,11 @@ function makeRow(): Row {
   check.style.color = "#454850"; // the completed tick is dimmer than the chevron
   check.style.position = "absolute";
   chevron.style.position = "absolute";
-  const shimmer = h("span", { class: "tick-text shimmer" });
+  const shimmer = h("span", { class: "tick-text shimmer", dir: "auto" });
   const dim = h("span", {
     class: "tick-text",
     style: "position:absolute;left:0;right:0;color:#6b7079",
+    dir: "auto",
   });
   const el = h(
     "div",
