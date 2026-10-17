@@ -360,25 +360,28 @@ pub async fn chat(
     Ok(ChatReply { text })
 }
 
-/// The full-screen window. The transcript is the window's to hold, so it is
-/// handed in and handed back rather than kept here.
+/// The full-screen window, on the island's transcript: one active conversation
+/// wherever the question is asked. The turn is stored before the delta is
+/// sent, so closing the window mid-answer still leaves the island with it.
 pub async fn send(
     url: &str,
-    mut history: Vec<Value>,
+    history: &Chat,
     prompt: String,
     channel: Channel<GooEvent>,
 ) -> Result<(), String> {
     let base = base(Some(url))?;
-    history.push(json!({ "role": "user", "content": prompt }));
+    let mut messages = history.snapshot();
+    messages.push(json!({ "role": "user", "content": prompt }));
 
-    match run(&base, &mut history).await {
+    match run(&base, &mut messages).await {
         Ok(message) => {
             let text = text_of(&message);
-            if !text.is_empty() {
-                channel
-                    .send(GooEvent::Delta { text })
-                    .map_err(|_| "window closed".to_string())?;
+            if text.is_empty() {
+                let _ = channel.send(GooEvent::Done);
+                return Err("PeDitX-AI returned an empty answer.".into());
             }
+            history.replace(messages);
+            let _ = channel.send(GooEvent::Delta { text });
             let _ = channel.send(GooEvent::Done);
             Ok(())
         }

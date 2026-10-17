@@ -2487,7 +2487,7 @@ dependencies = [
 
 [[package]]
 name = "peditx-goo"
-version = "0.1.17"
+version = "0.1.20"
 dependencies = [
  "libc",
  "reqwest 0.12.28",

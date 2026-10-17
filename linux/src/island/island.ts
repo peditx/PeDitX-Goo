@@ -2,7 +2,7 @@
 // Mirrors IslandRootView.swift + IslandWindowController.swift.
 
 import { Tracked, Spring, clamp } from "../core/anim";
-import { Bridge, IS_TAURI, onDragDrop } from "../core/bridge";
+import { Bridge, IS_TAURI, onDragDrop, onEvent, turnsOf } from "../core/bridge";
 import {
   EXPANDED_CORNER, EXPANDED_W, NOTCH_W, PANEL_H, PANEL_W,
   ROUNDED_CORNER, VIEW_LAYOUTS, botGlowColor, botGlowOpacity, botPosition, chatPromptHeight,
@@ -103,6 +103,20 @@ export class Island {
     State.subscribe(() => {
       this.dirty = true;
       this.ensureRunning();
+    });
+    // The transcript is Rust's and the full-screen window writes to it too —
+    // a question asked there, a New chat, or a session switch all land here.
+    void onEvent("chat-changed", () => {
+      void Bridge.chatHistory().then((raw) => {
+        if (!raw) return;
+        State.chatHistory = turnsOf(raw).map((t, i) => ({
+          id: i + 1,
+          role: t.role,
+          content: t.content,
+        }));
+        State.notify();
+        if (State.view === "prompt") this.animateGeometry(false);
+      });
     });
   }
 

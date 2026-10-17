@@ -10,7 +10,7 @@
 // conversation has to survive the app).
 
 import "./goo.css";
-import { Bridge, type ChatTurn } from "../core/bridge";
+import { Bridge, onEvent, turnsOf, type ChatTurn } from "../core/bridge";
 import { h, clear, svg } from "../views/dom";
 import { ICONS } from "../views/icons";
 
@@ -83,6 +83,9 @@ function renderTabs() {
     tab.addEventListener("click", () => {
       if (streaming || s === active) return;
       active = s;
+      // The selected session becomes the shared transcript: the island's next
+      // question lands here, and its history shows this conversation.
+      void Bridge.chatLoad(sessionMessages(s));
       renderTabs();
       renderTranscript();
       input.focus();
@@ -104,14 +107,10 @@ function renderTabs() {
 
 function openNewSession() {
   if (streaming) return;
-  // The current tab already says nothing — a second blank tab is clutter.
-  if (active.turns.length === 0) {
-    renderTranscript();
-    input.focus();
-    return;
-  }
   active = newSession();
   sessions.push(active);
+  // The island shares this transcript — a new chat here is a new chat there.
+  void Bridge.chatLoad([]);
   renderTabs();
   renderTranscript();
   input.focus();
@@ -123,9 +122,31 @@ function closeSession(s: Session) {
   sessions.splice(i, 1);
   if (s === active) {
     active = sessions[Math.max(0, i - 1)];
+    void Bridge.chatLoad(sessionMessages(active));
     renderTranscript();
   }
   renderTabs();
+}
+
+function sessionMessages(s: Session): unknown[] {
+  return s.turns.map((t) => ({ role: t.role, content: t.content }));
+}
+
+const titleOf = (text: string) => (text.length > 28 ? `${text.slice(0, 28)}…` : text);
+
+/**
+ * The one active conversation lives in Rust, next to the island's. Every
+ * window reads it from there — this window's tabs, the island's transcript
+ * and the overview's history are views of the same thing.
+ */
+async function refreshActive() {
+  const raw = await Bridge.chatHistory();
+  if (raw) active.turns = turnsOf(raw);
+  if (!active.title && active.turns.length > 0) {
+    active.title = titleOf(active.turns[0].content);
+  }
+  renderTabs();
+  renderTranscript();
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
@@ -204,15 +225,12 @@ async function submit() {
     return;
   }
 
-  // Snapshot taken before the new turn: Rust appends the prompt itself.
-  const history = active.turns.map((t) => ({ role: t.role, content: t.content }));
-
   input.value = "";
   autoGrow();
   clearEmpty();
 
   if (!active.title) {
-    active.title = text.length > 28 ? `${text.slice(0, 28)}…` : text;
+    active.title = titleOf(text);
     renderTabs();
   }
   active.turns.push({ role: "user", content: text });
@@ -227,7 +245,7 @@ async function submit() {
 
   setBusy(true);
   try {
-    await Bridge.gooSend(history, text, (delta) => {
+    await Bridge.gooSend(text, (delta) => {
       answer.content += delta;
       body.textContent = answer.content;
       scrollToEnd();
@@ -243,9 +261,17 @@ async function submit() {
     notice(message);
   } finally {
     setBusy(false);
+    // A chat-changed that landed mid-turn re-reads the stored transcript now.
+    if (pendingRefresh) {
+      pendingRefresh = false;
+      void refreshActive();
+    }
     input.focus();
   }
 }
+
+/** A chat-changed event while streaming is applied once the turn is done. */
+let pendingRefresh = false;
 
 function autoGrow() {
   input.style.height = "auto";
@@ -268,9 +294,19 @@ async function boot() {
   configured = (await Bridge.gooConfigured()) ?? false;
   statusDot.style.background = configured ? "#22c55e" : "#f4505e";
   statusText.textContent = configured ? "ready" : "not configured";
-  renderTabs();
-  renderTranscript();
+  // Opens on whatever the island was last talking about — one conversation.
+  await refreshActive();
   input.focus();
 }
 
 void boot();
+
+// The island asked something, reset, or selected another session: this window
+// follows the shared transcript. While a turn is running, apply it after.
+void onEvent("chat-changed", () => {
+  if (streaming) {
+    pendingRefresh = true;
+    return;
+  }
+  void refreshActive();
+});

@@ -71,13 +71,16 @@ export const Bridge = {
   chatSend: (query: string, context: ChatContext | null) =>
     callOrThrow<{ text: string }>("chat_send", { query, context }),
   chatReset: () => call<void>("chat_reset"),
+  /** The shared transcript, raw, as the Rust side holds it. */
+  chatHistory: () => call<unknown[]>("chat_history"),
+  /** Makes `messages` the shared transcript — how a session tab is selected. */
+  chatLoad: (messages: unknown[]) => call<void>("chat_load", { messages }),
 
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
 
-  /** One streamed turn for the full-screen window. */
-  gooSend: (history: ChatTurn[], prompt: string, onDelta: (text: string) => void) =>
-    streamGoo(history, prompt, onDelta),
+  /** One streamed turn for the full-screen window, on the shared transcript. */
+  gooSend: (prompt: string, onDelta: (text: string) => void) => streamGoo(prompt, onDelta),
 };
 
 export type ChatContext =
@@ -104,10 +107,10 @@ export type GooEvent = { type: "delta"; text: string } | { type: "done" };
 
 /**
  * One streamed turn. Rust signs the request and reads the bearer key; all that
- * crosses back is text, so this file never touches the secret.
+ * crosses back is text, so this file never touches the secret. The transcript
+ * is Rust's: the prompt is appended there, not here.
  */
 export async function streamGoo(
-  history: ChatTurn[],
   prompt: string,
   onDelta: (text: string) => void,
 ): Promise<void> {
@@ -116,7 +119,38 @@ export async function streamGoo(
   channel.onmessage = (event) => {
     if (event.type === "delta") onDelta(event.text);
   };
-  await invoke("goo_send", { history, prompt, channel });
+  await invoke("goo_send", { prompt, channel });
+}
+
+/** `content` as the answer reads it: a string, or a list of text blocks. */
+function turnText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((block) =>
+        block && typeof block === "object" && "text" in block
+          ? String((block as { text?: unknown }).text ?? "")
+          : "",
+      )
+      .join("\n");
+  }
+  return "";
+}
+
+/**
+ * The shared transcript as the UI draws it: user and assistant turns with
+ * content, tool calls and tool results dropped — they are the agent's plumbing.
+ */
+export function turnsOf(raw: unknown): ChatTurn[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ChatTurn[] = [];
+  for (const item of raw) {
+    const m = item as { role?: unknown; content?: unknown };
+    if (m?.role !== "user" && m?.role !== "assistant") continue;
+    const text = turnText(m.content).trim();
+    if (text) out.push({ role: m.role as ChatTurn["role"], content: text });
+  }
+  return out;
 }
 
 /** Same as `call`, but surfaces the error so the UI can show what went wrong. */

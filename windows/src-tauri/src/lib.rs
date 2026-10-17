@@ -143,34 +143,61 @@ fn quit_app(app: AppHandle) {
 
 /// One island turn. The address is read fresh, so a change in Settings applies
 /// to the next message; everything else about the answer is PeDitX-AI's.
+/// Every window is told afterwards: the transcript is shared, not mirrored.
 #[tauri::command]
 async fn chat_send(
+    app: AppHandle,
     shared: State<'_, Shared>,
     chat: State<'_, Chat>,
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, String> {
     let url = shared.settings.lock().unwrap().backend_url.clone();
-    backend::chat(&url, &chat, query, context).await
+    let out = backend::chat(&url, &chat, query, context).await;
+    if out.is_ok() {
+        let _ = app.emit("chat-changed", ());
+    }
+    out
 }
 
 #[tauri::command]
-fn chat_reset(chat: State<Chat>) {
+fn chat_reset(app: AppHandle, chat: State<Chat>) {
     chat.reset();
+    let _ = app.emit("chat-changed", ());
 }
 
-/// One turn for the full-screen window. The answer arrives as one delta;
-/// PeDitX-AI does not stream, and pretending otherwise would only shuffle
-/// whitespace around on screen.
+/// The shared transcript as the UI draws it: both windows read this instead of
+/// keeping a copy of their own.
+#[tauri::command]
+fn chat_history(chat: State<Chat>) -> Vec<Value> {
+    chat.snapshot()
+}
+
+/// A session switch in the full-screen window: the conversation it selects
+/// becomes the one the island shows and the next question lands in.
+#[tauri::command]
+fn chat_load(app: AppHandle, chat: State<Chat>, messages: Vec<Value>) {
+    chat.replace(messages);
+    let _ = app.emit("chat-changed", ());
+}
+
+/// One turn for the full-screen window, on the shared transcript. The answer
+/// arrives as one delta; PeDitX-AI does not stream, and pretending otherwise
+/// would only shuffle whitespace around on screen.
 #[tauri::command]
 async fn goo_send(
+    app: AppHandle,
     shared: State<'_, Shared>,
-    history: Vec<Value>,
+    chat: State<'_, Chat>,
     prompt: String,
     channel: Channel<GooEvent>,
 ) -> Result<(), String> {
     let url = shared.settings.lock().unwrap().backend_url.clone();
-    backend::send(&url, history, prompt, channel).await
+    let out = backend::send(&url, &chat, prompt, channel).await;
+    if out.is_ok() {
+        let _ = app.emit("chat-changed", ());
+    }
+    out
 }
 
 /// The chat window's empty state. Says "yes" or "no", never which half is
@@ -335,6 +362,8 @@ pub fn run() {
             log_line,
             chat_send,
             chat_reset,
+            chat_history,
+            chat_load,
             goo_send,
             goo_configured,
             agent_status,
