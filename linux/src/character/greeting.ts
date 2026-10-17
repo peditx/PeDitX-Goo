@@ -35,7 +35,9 @@ export const GREETING_END = T.end;
 
 const C0 = { x: 320, y: 90 };
 const HB = 58;
-const ASP = 1.34;
+// The engine draws rx = 1.14R, ry = 0.88R — same aspect here, or the
+// greeting is a different creature from the one that lives in the strip.
+const ASP = 1.14 / 0.88;
 const EAR_X = 40;
 const EAR_Y = 16;
 const EAR_HB = 17;
@@ -249,7 +251,8 @@ function rr(x: CanvasRenderingContext2D, X: number, Y: number, W: number, H: num
 }
 
 function gooPath(hw: number, hh: number): Path2D {
-  const n = 3.2;
+  // The engine's expN is 2.0/2.5: this same 2/n, with n = 2.5.
+  const n = 2.5;
   const p = new Path2D();
   const steps = 96;
   for (let i = 0; i <= steps; i++) {
@@ -326,10 +329,12 @@ function drawGoo(x: CanvasRenderingContext2D, p: Pose) {
   x.clip(body);
   x.fillStyle = "#FFFFFF";
   x.strokeStyle = "#FFFFFF";
-  const er = p.hb * 0.06;
+  // Radius 0.33R where R = hw / 1.14 — three times the old dot, which is
+  // what made the splash read as a different character.
+  const er = p.hb * 0.1875;
   const sp = p.hb * 0.19;
   const lx = p.lookX * hw * 0.42;
-  const ly = p.lookY * hh * 0.28 + hh * 0.12 + p.eyeRoll * hh * 1.25;
+  const ly = p.lookY * hh * 0.28 - hh * 0.136 + p.eyeRoll * hh * 1.25;
   for (const sd of [-1, 1]) {
     x.save();
     x.translate(sd * sp + lx, ly);
