@@ -119,7 +119,7 @@ export const SHADOW = { x: 201, y: 399, rx: 105, ry: 17 };
 // whatever R the island is using.
 
 /** Eye centres, in body-half-width units from the origin. */
-export const EYES = { dx: 0.35, dy: -0.1, rx: 0.3, ry: 0.3 };
+export const EYES = { dx: 0.33, dy: -0.12, rx: 0.33, ry: 0.33 };
 /** Blush, same units. */
 export const BLUSH = { dx: 0.558, dy: 0.038, rx: 0.14, ry: 0.08 };
 /** Mouth, same units: an arc `hw` either side of (dx, dy), bowing down `bow`. */

@@ -657,16 +657,11 @@ export class BotEngine {
     x.scale(this.sx, this.sy);
 
     const body = this.bodyPath(rx, ry, R);
-    this.drawAntenna(x, R, ry);
-    this.drawTufts(x, R);
     this.drawBody(x, body, R, rx, ry);
-    this.drawLimbs(x, R);
-    this.drawSparkles(x, R);
 
     this.drawEyes(x, R);
     if (this.morph > 0.05) this.drawMouth(x, body, R);
-    if (this.morph <= 0.5) this.drawHeart(x, R);
-
+    if (this.morph <= 0.5) 
     x.restore();
 
     if (this.badge && this.badgeS > 0.01 && this.morph < 0.25) {
@@ -679,10 +674,9 @@ export class BotEngine {
     // ponytail: below half-swallowed the outline is the drawn character; past
     // it, the old rounded-rect morph. A hard swap mid-swallow, masked by the
     // mouth opening. Upgrade path: sample both outlines and lerp the radii.
-    if (this.morph <= 0.5) return GOO.bodyPath(R);
-
     const n = 72;
-    const expN = 2.0 / 2.7;
+    // Plain and round: a blob with two eyes, nothing else.
+    const expN = 2.0 / 2.5;
     const tw = R * 1.0;
     const th = R * 0.94;
     const tr = R * 0.42;
@@ -707,109 +701,6 @@ export class BotEngine {
     p.closePath();
     return p;
   }
-
-  /** Fur tufts — drawn first so they read as a fringe around the body. */
-  private drawTufts(x: CanvasRenderingContext2D, R: number) {
-    GOO.withArt(x, R, () => {
-      x.strokeStyle = GOO.FUR.tuft;
-      x.lineWidth = 7;
-      x.lineCap = "round";
-      for (const t of GOO.TUFTS) x.stroke(t);
-    });
-  }
-
-  /** Legs and feet, in front of the lower body exactly as in the source. */
-  private drawLimbs(x: CanvasRenderingContext2D, R: number) {
-    GOO.withArt(x, R, () => {
-      x.strokeStyle = GOO.FUR.leg;
-      x.lineWidth = 23;
-      x.lineCap = "round";
-      x.lineJoin = "round";
-      for (const l of GOO.LEGS) x.stroke(l);
-      x.fillStyle = GOO.FUR.foot;
-      for (const f of GOO.FEET) {
-        x.beginPath();
-        x.ellipse(f.x, f.y, f.rx, f.ry, 0, 0, Math.PI * 2);
-        x.fill();
-      }
-    });
-  }
-
-  private drawSparkles(x: CanvasRenderingContext2D, R: number) {
-    const a = Math.max(0.35, 1 - this.morph);
-    GOO.withArt(x, R, () => {
-      x.globalAlpha = a;
-      x.fillStyle = GOO.FUR.sparkle;
-      for (const s of GOO.SPARKLES) {
-        x.beginPath();
-        x.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-        x.fill();
-      }
-      x.globalAlpha = 1;
-    });
-  }
-
-  /** The heart it hugs — beats while idle, gone once it has swallowed. */
-  private drawHeart(x: CanvasRenderingContext2D, R: number) {
-    const beat = 1 + Math.sin(now() * 3.2) * 0.025;
-    GOO.withArt(x, R, () => {
-      x.save();
-      const cx = 201;
-      const cy = 284;
-      x.translate(cx, cy);
-      x.scale(beat, beat);
-      x.translate(-cx, -cy);
-      const g = x.createLinearGradient(155, 241, 247, 326);
-      g.addColorStop(0, GOO.FUR.heart);
-      g.addColorStop(1, GOO.FUR.heartDeep);
-      x.fillStyle = g;
-      x.strokeStyle = GOO.FUR.heartEdge;
-      x.lineWidth = 3;
-      x.fill(GOO.HEART);
-      x.stroke(GOO.HEART);
-      x.strokeStyle = GOO.FUR.heartShine;
-      x.lineWidth = 5;
-      x.lineCap = "round";
-      x.stroke(GOO.HEART_SHINE);
-      x.fillStyle = GOO.FUR.claw;
-      for (const c of GOO.CLAWS) x.fill(c);
-    });
-  }
-
-  /**
-   * A thin stalk off the crown with a lit tip, leaning the way the body just
-   * moved. Drawn before the body so its base hides behind the fluff.
-   */
-  private drawAntenna(x: CanvasRenderingContext2D, R: number, ry: number) {
-    // Tall enough to clear the fur — the longest tuft reaches about -1.6R, so
-    // anything shorter disappears into it.
-    const len = R * 0.95;
-    const baseY = -ry * 0.9;
-    const lean = -(this.ox * 1.6 + this.tilt * 0.9) * len;
-    const tipX = Math.max(-R, Math.min(R, lean));
-    const tipY = baseY - len;
-
-    x.save();
-    x.strokeStyle = "rgba(219,228,244,0.95)";
-    x.lineWidth = Math.max(2.5, R * 0.058);
-    x.lineCap = "round";
-    x.beginPath();
-    x.moveTo(0, baseY);
-    x.quadraticCurveTo(tipX * 0.35, baseY - len * 0.6, tipX, tipY);
-    x.stroke();
-
-    const r = R * 0.16;
-    const glow = x.createRadialGradient(tipX, tipY, 0, tipX, tipY, r * 2.2);
-    glow.addColorStop(0, "rgba(255,255,255,0.98)");
-    glow.addColorStop(0.4, "rgba(120,170,255,0.92)");
-    glow.addColorStop(1, "rgba(120,170,255,0)");
-    x.fillStyle = glow;
-    x.beginPath();
-    x.arc(tipX, tipY, r * 2.2, 0, Math.PI * 2);
-    x.fill();
-    x.restore();
-  }
-
   private drawBody(x: CanvasRenderingContext2D, body: Path2D, R: number, rx: number, ry: number) {
     if (this.bodyColor) {
       // Mini bots: flat solid fill — no gradient, no reflection, no highlight
@@ -885,22 +776,7 @@ export class BotEngine {
       const halfW = GOO.BODY_HALF.x;
       const O = GOO.BODY_ORIGIN;
 
-      // Blush first: it sits behind the eyes.
-      const blushA = Math.max(0.7, this.blush, this.tint * 0.5) * (1 - this.morph);
-      if (blushA > 0.01) {
-        x.globalAlpha = 0.75 * blushA;
-        x.fillStyle = GOO.FUR.blush;
-        for (const sd of [-1, 1]) {
-          x.beginPath();
-          x.ellipse(O.x + sd * GOO.BLUSH.dx * halfW + ox,
-            O.y + GOO.BLUSH.dy * halfW + oy,
-            GOO.BLUSH.rx * halfW, GOO.BLUSH.ry * halfW, 0, 0, Math.PI * 2);
-          x.fill();
-        }
-        x.globalAlpha = 1;
-      }
-
-      if (ryS < 0.35) return; // shut: nothing to show on a dark body
+            if (ryS < 0.35) return; // shut: nothing to show on a dark body
 
       for (const sd of [-1, 1]) {
         const ex = O.x + sd * E.dx * halfW + ox;
@@ -965,18 +841,7 @@ export class BotEngine {
         }
       }
 
-      // The smile, under the eyes.
-      const M = GOO.MOUTH;
-      const flat = shut || shape === "tired";
-      const mx = O.x + M.dx * halfW + ox;
-      const my = O.y + M.dy * halfW + oy;
-      x.strokeStyle = GOO.FUR.mouth;
-      x.lineWidth = 5;
-      x.lineCap = "round";
-      x.beginPath();
-      x.moveTo(mx - M.hw * halfW, my);
-      x.quadraticCurveTo(mx, my + M.bow * halfW * (flat ? 0.3 : 1), mx + M.hw * halfW, my);
-      x.stroke();
+
     });
   }
 
