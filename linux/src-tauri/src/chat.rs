@@ -81,7 +81,9 @@ impl Chat {
     pub(crate) fn replace(&self, messages: Vec<Value>) {
         let mut t = self.state.lock().unwrap();
         t.ensure();
-        if let Some(s) = t.sessions.iter_mut().find(|s| s.id == t.active) {
+        // The guard derefs as a whole, so the id goes local before the mutation.
+        let active = t.active;
+        if let Some(s) = t.sessions.iter_mut().find(|s| s.id == active) {
             s.messages = messages;
         }
     }
@@ -100,11 +102,12 @@ impl Chat {
         if !force && empty {
             return t.json();
         }
+        let id = t.next_id;
         t.sessions.push(Session {
-            id: t.next_id,
+            id,
             messages: Vec::new(),
         });
-        t.active = t.next_id;
+        t.active = id;
         t.next_id += 1;
         t.json()
     }
