@@ -385,10 +385,20 @@ function buildSettings(actions: ViewActions): ViewHost {
     style: "flex:1 1 auto;min-width:0;background:#1E2024;color:#ECEDEF;"
       + "border:1px solid #32353B;border-radius:8px;padding:3px 8px;font-size:11.5px;",
   }) as HTMLInputElement;
-  urlField.addEventListener("change", () => {
+  const commitUrl = () => {
     State.settings.backendUrl = urlField.value.trim();
     void Bridge.saveSettings(State.settings);
     State.notify();
+    clear(feedback);
+    feedback.append(h("div", { style: "color:#22C55E", text: "Address saved." }));
+  };
+  urlField.addEventListener("change", commitUrl);
+  // Enter commits without having to hunt for somewhere else to click first.
+  urlField.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Enter") {
+      commitUrl();
+      urlField.blur();
+    }
   });
 
   const testBtn = h("button", {
@@ -463,6 +473,9 @@ function buildSettings(actions: ViewActions): ViewHost {
 
   return {
     el,
+    focus() {
+      urlField.focus();
+    },
     sync() {
       const s = State.settings;
       soundSwitch.classList.toggle("on", s.soundEnabled);

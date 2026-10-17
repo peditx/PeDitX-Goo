@@ -27,6 +27,9 @@ const HIT_MARGIN = 14;
 /** The three views the drop sequence owns; leaving them stops the engine. */
 const UPLOAD_VIEWS: ReadonlySet<IslandViewName> = new Set(["upload", "uploading", "choose"]);
 
+/** The views holding a text field — chat, and the endpoint row in Settings. */
+const TYPING_VIEWS: ReadonlySet<IslandViewName> = new Set(["prompt", "settings"]);
+
 /** Seconds between the drop and the moment the progress bar starts filling. */
 const PRE_PROGRESS = USC.T_PROG_START - USC.T_DROP;
 
@@ -810,15 +813,16 @@ export class Island {
       if (on) view.sync();
     }
 
-    // The chat is the only view with a text field, so it is the only time the
-    // island is allowed to take keyboard focus.
+    // Only the views with a text field may take keyboard focus — without it
+    // the island's window is non-activating and keystrokes land elsewhere.
     if (this.lastSyncedView !== State.view) {
-      const wasChat = this.lastSyncedView === "prompt";
+      const wasTyping = this.lastSyncedView != null && TYPING_VIEWS.has(this.lastSyncedView);
+      const isTyping = TYPING_VIEWS.has(State.view);
       this.lastSyncedView = State.view;
-      if (State.view === "prompt") {
+      if (isTyping) {
         void Bridge.focusWindow(true);
-        window.setTimeout(() => this.views.get("prompt")?.focus?.(), 120);
-      } else if (wasChat) {
+        window.setTimeout(() => this.views.get(State.view)?.focus?.(), 120);
+      } else if (wasTyping) {
         void Bridge.focusWindow(false);
       }
     }

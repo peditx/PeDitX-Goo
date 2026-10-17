@@ -157,6 +157,9 @@ function backendSection(): HTMLElement {
   openChat.addEventListener("click", () => void Bridge.openGooWindow());
 
   void refresh();
+  // The island writes the same settings object, so this panel has to re-read
+  // it — otherwise the address shown here is the one from before the change.
+  READERS.push(() => refresh());
 
   return h(
     "section",
@@ -264,6 +267,9 @@ function generalSection(): HTMLElement {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
+/** Sections re-read `settings` when another window writes the same object. */
+const READERS: (() => void)[] = [];
+
 async function main() {
   const boot = await Bridge.boot();
   if (boot) {
@@ -284,6 +290,7 @@ async function main() {
 
   void onEvent<Settings>("settings-changed", (s) => {
     settings = { ...settings, ...s };
+    for (const read of READERS) read();
   });
 }
 

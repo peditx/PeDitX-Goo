@@ -104,9 +104,6 @@ fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
 fn set_island_rect(shared: State<Shared>, x: f64, y: f64, width: f64, height: f64) {
     shared.gate.set_rect(island::IslandRect { x, y, w: width, h: height });
     shared.gate.forget_ignore_state();
-    crate::log::line(format!(
-        "rect pushed: ({x:.0},{y:.0},{width:.0}x{height:.0})"
-    ));
 }
 
 #[tauri::command]
