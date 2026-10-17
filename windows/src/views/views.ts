@@ -8,7 +8,6 @@ import { Ticker } from "./ticker";
 import { Bridge } from "../core/bridge";
 import { State, type AgentTask } from "../core/state";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
-import { createMiniBot, pruneMiniBots } from "../character/minibots";
 import { buildPrompt } from "./chat";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 
@@ -127,19 +126,30 @@ function buildOverview(actions: ViewActions): ViewHost {
     svg(ICONS.arrowUpRight, 8),
   );
   const left = card(null, leftBody, jump);
-  const pills = h("div", { class: "pills" });
-  const right = card(null, pills);
+
+  // Right side: chat history + Goo logo button to open full-screen chat
+  const historyEl = h("div", { class: "overview-history" });
+  const gooBtn = h(
+    "button",
+    {
+      class: "icon-btn goo-btn",
+      title: "Open chat",
+      onclick: () => actions.openChat(),
+    },
+    svg(ICONS.goo, 18),
+  );
+  const right = card(null, h("div", { class: "overview-right" }, historyEl, gooBtn));
 
   const el = h("div", { class: "view overview" },
     h("div", { class: "left" }, left),
     h("div", { class: "right" }, right),
   );
 
-  let pillIds = "";
   let detailOpen = false;
   let lastFocus: string | null = null;
   let mode: "ticker" | "card" | null = null;
   let cardKey = "";
+  let lastHistoryKey: string | null = null;
 
   // The left card before anything has been said: where this island is pointed.
   const statusDot = h("i", { class: "status-dot" });
@@ -152,6 +162,39 @@ function buildOverview(actions: ViewActions): ViewHost {
       statusSub,
     ),
   );
+
+  function renderHistory() {
+    const history = State.chatHistory;
+    const historyKey = history.map((m) => `${m.id}:${m.role}:${m.content.slice(0, 30)}`).join("|");
+    if (historyKey === lastHistoryKey) return;
+    lastHistoryKey = historyKey;
+
+    clear(historyEl);
+    if (history.length === 0) {
+      historyEl.append(
+        h("div", { class: "overview-empty", style: "display:flex;align-items:center;justify-content:center;height:100%;color:var(--dim-3);font:400 12px var(--font)" },
+          "No conversation yet"
+        )
+      );
+      return;
+    }
+
+    // Show last 4 messages
+    const recent = history.slice(-4);
+    for (const msg of recent) {
+      const row = h("div", { class: `overview-msg ${msg.role === "user" ? "user" : ""}` });
+      const bubble = h("div", { class: "overview-bubble", text: msg.content });
+      if (msg.role === "user") {
+        row.style.justifyContent = "flex-end";
+        row.append(bubble);
+      } else {
+        row.append(bubble);
+      }
+      historyEl.append(row);
+    }
+    // Scroll to bottom
+    historyEl.scrollTop = historyEl.scrollHeight;
+  }
 
   return {
     el,
@@ -203,58 +246,10 @@ function buildOverview(actions: ViewActions): ViewHost {
 
       jump.style.display = detailOpen ? "none" : "";
 
-      const others = State.otherTasks.slice(0, 4);
-      const pillKey = others.map((t) => `${t.id}:${t.pillBadge ?? ""}`).join("|");
-      if (pillKey !== pillIds) {
-        pillIds = pillKey;
-        clear(pills);
-        for (const t of others) pills.append(buildPill(t, actions));
-        pruneMiniBots();
-      }
+      // Render chat history on right side
+      renderHistory();
     },
   };
-}
-
-function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {
-  const label = task.name;
-  const canvas = createMiniBot(task, 24);
-  const pill = h(
-    "div",
-    { class: "pill", onclick: () => actions.setFocus(task.id) },
-    canvas,
-    h("span", { class: "lbl", text: label }),
-  );
-  pill.style.borderColor = `${task.color}24`;
-  pill.addEventListener("mouseenter", () => {
-    pill.style.background = `${task.color}2e`;
-    pill.style.borderColor = `${task.color}8c`;
-    pill.style.boxShadow = `0 2px 10px ${task.color}59`;
-    (pill.querySelector(".lbl") as HTMLElement).style.color = lighten(task.color, 0.3);
-  });
-  pill.addEventListener("mouseleave", () => {
-    pill.style.background = "";
-    pill.style.borderColor = `${task.color}24`;
-    pill.style.boxShadow = "";
-    (pill.querySelector(".lbl") as HTMLElement).style.color = "";
-  });
-
-  if (task.pillBadge) {
-    const colors = { approval: "#F5A524", finished: "#22C55E", error: "#F4505E" } as const;
-    const icons = { approval: ICONS.bang, finished: ICONS.check, error: ICONS.xmark } as const;
-    const inner = h("i", { style: `background:${colors[task.pillBadge]}` }, svg(icons[task.pillBadge], 6, { stroke: task.pillBadge === "finished" ? 3 : 0 }));
-    const badge = h("div", { class: "pill-badge" }, inner);
-    badge.style.boxShadow = `0 0 4px ${colors[task.pillBadge]}99`;
-    pill.append(badge);
-  }
-  return pill;
-}
-
-function lighten(hex: string, amount: number): string {
-  const v = parseInt(hex.replace("#", ""), 16);
-  const c = [(v >> 16) & 255, (v >> 8) & 255, v & 255].map((x) =>
-    Math.min(255, Math.round(x + amount * 255)),
-  );
-  return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
 
 // ── Empty ─────────────────────────────────────────────────────────────────────

@@ -499,6 +499,84 @@ body {
   }
 }
 
+/* ── Overview right side: chat history + Goo button ─────────────────────── */
+
+.overview-right {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-history {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.overview-msg {
+  display: flex;
+  max-width: 85%;
+}
+
+.overview-msg.user {
+  align-self: flex-end;
+}
+
+.overview-bubble {
+  font: 400 11px var(--font);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  padding: 4px 8px;
+  border-radius: 10px;
+  user-select: text;
+  line-height: 1.4;
+}
+
+.overview-msg.user .overview-bubble {
+  background: rgba(255, 255, 255, 0.13);
+  border-bottom-right-radius: 2px;
+}
+
+.overview-msg:not(.user) .overview-bubble {
+  background: rgba(255, 255, 255, 0.07);
+  color: #b0b5be;
+  border-bottom-left-radius: 2px;
+}
+
+.overview-empty {
+  text-align: center;
+}
+
+.goo-btn {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  z-index: 2;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(47, 107, 255, 0.22);
+  border: 1px solid rgba(47, 107, 255, 0.45);
+  color: #cfe0ff;
+}
+
+.goo-btn:hover {
+  background: rgba(47, 107, 255, 0.45);
+  color: #fff;
+  box-shadow: 0 0 10px rgba(47, 107, 255, 0.5);
+}
+
+.goo-btn:active {
+  transform: scale(0.94);
+}
+
 /* ── Agent pills ────────────────────────────────────────────────────────── */
 
 .pills {

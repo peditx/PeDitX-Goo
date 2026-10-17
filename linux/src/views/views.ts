@@ -136,7 +136,7 @@ function buildOverview(actions: ViewActions): ViewHost {
       title: "Open chat",
       onclick: () => actions.openChat(),
     },
-    svg(ICONS.goo, 14),
+    svg(ICONS.goo, 18),
   );
   const right = card(null, h("div", { class: "overview-right" }, historyEl, gooBtn));
 
@@ -149,7 +149,7 @@ function buildOverview(actions: ViewActions): ViewHost {
   let lastFocus: string | null = null;
   let mode: "ticker" | "card" | null = null;
   let cardKey = "";
-  let lastHistoryKey = "";
+  let lastHistoryKey: string | null = null;
 
   // The left card before anything has been said: where this island is pointed.
   const statusDot = h("i", { class: "status-dot" });
