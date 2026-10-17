@@ -58,13 +58,11 @@ export interface Settings {
   screen: "primary" | "cursor";
   autostart: boolean;
   /**
-   * OpenAI-compatible base URL — `http://192.168.1.1:8765/v1`, 9Router, or a
-   * public gateway. Plain text on purpose: an address is not a secret, and
-   * hiding it would make a mistyped IP invisible. Empty = not configured.
+   * Where PeDitX-AI is listening — `http://127.0.0.1:8765` unless moved.
+   * Goo has no endpoint, key or model of its own; this points at the agent.
+   * Plain text on purpose: an address is not a secret.
    */
   backendUrl: string;
-  /** Model sent with every turn; filled from `GET /models` in Settings. */
-  model: string;
   /** Global shortcut that reveals the island, written as "Ctrl+Shift+N". */
   hotkey: string;
   /** Whether the desktop is holding that shortcut for us. */
@@ -78,8 +76,7 @@ export const DEFAULT_SETTINGS: Settings = {
   absenceInterval: 180,
   screen: "primary",
   autostart: false,
-  backendUrl: "",
-  model: "",
+  backendUrl: "http://127.0.0.1:8765",
   hotkey: "Ctrl+Shift+N",
   hotkeyEnabled: false,
 };

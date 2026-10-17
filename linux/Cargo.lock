@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "peditx-goo"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "keyring",
  "reqwest 0.12.28",

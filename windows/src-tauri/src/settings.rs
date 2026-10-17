@@ -14,17 +14,13 @@ pub struct Settings {
     /// "primary" = the main display, "cursor" = whichever display the mouse is on.
     pub screen: String,
     pub autostart: bool,
-    /// OpenAI-compatible base URL: `http://192.168.1.1:8765/v1`, 9Router, or a
-    /// public gateway. Plain text on purpose — an address is not a secret, and
-    /// hiding it would make a mistyped IP invisible. The key beside it is a
-    /// secret and never lands in this file. Empty = not configured.
+    /// Where PeDitX-AI is listening — `http://127.0.0.1:8765` unless the user
+    /// moved it. Goo has no endpoint, no key and no model of its own; this is
+    /// the address of the agent it is the face of. Plain text on purpose: an
+    /// address is not a secret, and hiding it would make a mistype invisible.
+    /// Empty = not configured.
     #[serde(default)]
     pub backend_url: String,
-    /// Model sent with every turn. Empty until Settings fills it from
-    /// `GET /models` — a gateway's model list is not something to guess.
-    /// Explicitly defaulted so a settings.json written by an older build loads.
-    #[serde(default = "default_model")]
-    pub model: String,
     /// Global shortcut that reveals the island, written as `Ctrl+Shift+N`.
     /// Written into the desktop's own shortcut registry — see `hotkey.rs`.
     #[serde(default = "default_hotkey")]
@@ -33,10 +29,6 @@ pub struct Settings {
     /// Off by default: a global shortcut steals the keys from every other app.
     #[serde(default)]
     pub hotkey_enabled: bool,
-}
-
-fn default_model() -> String {
-    crate::chat::DEFAULT_MODEL.to_string()
 }
 
 fn default_hotkey() -> String {
@@ -52,8 +44,8 @@ impl Default for Settings {
             absence_interval: 180.0,
             screen: "primary".into(),
             autostart: false,
-            backend_url: String::new(),
-            model: default_model(),
+            // PeDitX-AI is installed next door and listens here by default.
+            backend_url: crate::backend::DEFAULT_AGENT.into(),
             hotkey: default_hotkey(),
             hotkey_enabled: false,
         }
@@ -88,7 +80,18 @@ fn settings_path() -> PathBuf {
 
 pub fn load() -> Settings {
     match std::fs::read(settings_path()) {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        Ok(bytes) => {
+            let mut settings: Settings = serde_json::from_slice(&bytes).unwrap_or_default();
+            // Up to 0.1.12 this field held the *model* endpoint, so a value
+            // with a model path in it is left over from the old meaning. Using
+            // it as PeDitX-AI's address would fail with a confusing error, so
+            // it goes back to the default instead.
+            let url = settings.backend_url.trim_end_matches('/');
+            if url.ends_with("/v1") || url.ends_with("/chat/completions") {
+                settings.backend_url = crate::backend::DEFAULT_AGENT.into();
+            }
+            Ok(settings)
+        }
         Err(_) => Settings::default(),
     }
 }

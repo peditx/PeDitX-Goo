@@ -6,7 +6,6 @@ mod files;
 mod hotkey;
 mod island;
 mod log;
-mod secrets;
 mod settings;
 mod tray;
 
@@ -142,8 +141,8 @@ fn quit_app(app: AppHandle) {
 
 // ── Chat and secrets ─────────────────────────────────────────────────────────
 
-/// One island turn. The API key and any file bytes stay on the Rust side, and
-/// the model is read fresh so a change in Settings applies to the next message.
+/// One island turn. The address is read fresh, so a change in Settings applies
+/// to the next message; everything else about the answer is PeDitX-AI's.
 #[tauri::command]
 async fn chat_send(
     shared: State<'_, Shared>,
@@ -151,11 +150,8 @@ async fn chat_send(
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, String> {
-    let (url, model) = {
-        let s = shared.settings.lock().unwrap();
-        (s.backend_url.clone(), s.model.clone())
-    };
-    backend::chat(&url, &chat, model, query, context).await
+    let url = shared.settings.lock().unwrap().backend_url.clone();
+    backend::chat(&url, &chat, query, context).await
 }
 
 #[tauri::command]
@@ -163,8 +159,9 @@ fn chat_reset(chat: State<Chat>) {
     chat.reset();
 }
 
-/// One streaming turn for the full-screen window. Deltas go over `channel`; the
-/// transcript is the window's to hold.
+/// One turn for the full-screen window. The answer arrives as one delta;
+/// PeDitX-AI does not stream, and pretending otherwise would only shuffle
+/// whitespace around on screen.
 #[tauri::command]
 async fn goo_send(
     shared: State<'_, Shared>,
@@ -172,11 +169,8 @@ async fn goo_send(
     prompt: String,
     channel: Channel<GooEvent>,
 ) -> Result<(), String> {
-    let (url, model) = {
-        let s = shared.settings.lock().unwrap();
-        (s.backend_url.clone(), s.model.clone())
-    };
-    backend::send(&url, history, model, prompt, channel).await
+    let url = shared.settings.lock().unwrap().backend_url.clone();
+    backend::send(&url, history, prompt, channel).await
 }
 
 /// The chat window's empty state. Says "yes" or "no", never which half is
@@ -186,34 +180,19 @@ fn goo_configured(shared: State<Shared>) -> bool {
     backend::configured(&shared.settings.lock().unwrap().backend_url)
 }
 
-/// `GET /models`. Doubles as the Settings "test connection" button: a returned
-/// list means the URL and the key are right, an error means they are not.
+/// PeDitX-AI's own view of itself: its endpoint, its model, its access mode.
+/// Read back, never edited here — and the key is reported as present or
+/// absent, never as a value.
 #[tauri::command]
-async fn goo_models(shared: State<'_, Shared>) -> Result<Vec<String>, String> {
+async fn agent_status(shared: State<'_, Shared>) -> Result<backend::AgentStatus, String> {
     let url = shared.settings.lock().unwrap().backend_url.clone();
-    backend::models(&url).await
+    backend::status(&url).await
 }
 
 /// Copies a dropped file into the inbox and reports its name back.
 #[tauri::command]
 fn ingest_file(path: String) -> Result<DroppedFile, String> {
     files::ingest(&path)
-}
-
-/// The island may only ask whether a value exists — never read it.
-#[tauri::command]
-fn secret_present(key: String) -> bool {
-    secrets::present(&key)
-}
-
-#[tauri::command]
-fn secret_set(key: String, value: String) -> Result<(), String> {
-    secrets::set(&key, &value)
-}
-
-#[tauri::command]
-fn secret_clear(key: String) -> Result<(), String> {
-    secrets::clear(&key)
 }
 
 /// Lets the island write to the same log as the Rust side.
@@ -358,11 +337,8 @@ pub fn run() {
             chat_reset,
             goo_send,
             goo_configured,
-            goo_models,
+            agent_status,
             ingest_file,
-            secret_present,
-            secret_set,
-            secret_clear,
             open_settings_window,
             open_goo_window,
         ])

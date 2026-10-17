@@ -21,7 +21,5 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
-# Secret Service (gnome-keyring / KWallet) with a kernel-keyring fallback.
-keyring = { version = "3", features = ["linux-native-sync-persistent"] }
 # Local timestamps for the log, without pulling in chrono.
 libc = "0.2"

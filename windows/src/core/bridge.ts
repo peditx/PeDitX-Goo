@@ -55,29 +55,25 @@ export const Bridge = {
 
   /** Opens the full-screen chat window. */
   openGooWindow: () => call<void>("open_goo_window"),
-  /** An endpoint is configured — never which half of it is missing. */
+  /** An address is set — never which half of it is missing. */
   gooConfigured: () => call<boolean>("goo_configured"),
   /**
-   * `GET /models` on the configured endpoint. A returned list means the address
-   * and the key are right; an error string is what Settings shows the user.
+   * PeDitX-AI read back: its endpoint, its model, its access mode. An error
+   * string is what Settings shows the user when it is not running.
    */
-  gooModels: () => callOrThrow<string[]>("goo_models"),
+  agentStatus: () => callOrThrow<AgentStatus>("agent_status"),
 
   /** Writes to %LOCALAPPDATA%\PeDitX-Goo\goo.log, next to the Rust lines. */
   log: (message: string) => call<void>("log_line", { message }),
 
   // ── Chat, files, secrets ──────────────────────────────────────────────────
-  /** One chat turn. The API key and any file bytes never leave Rust. */
+  /** One chat turn, handed to PeDitX-AI whole. */
   chatSend: (query: string, context: ChatContext | null) =>
     callOrThrow<{ text: string }>("chat_send", { query, context }),
   chatReset: () => call<void>("chat_reset"),
 
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
-  /** Only ever tells you whether a key exists — never its value. */
-  secretPresent: (key: string) => call<boolean>("secret_present", { key }),
-  secretSet: (key: string, value: string) => callOrThrow<void>("secret_set", { key, value }),
-  secretClear: (key: string) => callOrThrow<void>("secret_clear", { key }),
 
   /** One streamed turn for the full-screen window. */
   gooSend: (history: ChatTurn[], prompt: string, onDelta: (text: string) => void) =>
@@ -87,6 +83,14 @@ export const Bridge = {
 export type ChatContext =
   | { kind: "file"; name: string; path: string }
   | { kind: "window"; appName: string; title: string; url?: string };
+
+/** PeDitX-AI read back: its endpoint, model and access mode. Never the key. */
+export interface AgentStatus {
+  endpoint: string;
+  model: string;
+  mode: string;
+  hasKey: boolean;
+}
 
 export interface DroppedFile {
   name: string;

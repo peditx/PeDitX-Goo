@@ -4,8 +4,8 @@
 
 # PeDitX-Goo
 
-**A small animated companion that sits at the top of your screen and chats with
-whatever OpenAI-compatible endpoint you point it at.**
+**PeDitX-AI's animated companion, sitting at the top of your screen.**
+Same agent, same memory, same Skills — Goo is the face of it.
 
 ![Linux](https://img.shields.io/badge/Linux-deb%20%2F%20rpm-16A085?logo=linux)
 ![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D4?logo=windows&logoColor=white)
@@ -18,46 +18,48 @@ whatever OpenAI-compatible endpoint you point it at.**
 
 ## Why
 
-Every assistant wants a window of its own. PeDitX-Goo wants a **strip**: a
-character that lives at the top edge, wakes when you hover it, watches your
-question, and reacts — happy jump when the answer lands, red shake when the
-endpoint does not. It says where it is pointed, and it never phones home.
+**PeDitX-Goo is not an assistant.** PeDitX-AI is. Goo is its face: the
+character at the top of the screen that asks the question, watches it work,
+and says the answer out loud in its own body language.
+
+Nothing is duplicated. The persona, the memory, the Skills, the access mode
+and the model all belong to PeDitX-AI; Goo holds none of them and cannot
+change any of them. A tool call runs under PeDitX-AI's rules, and the answer
+comes back through PeDitX-AI's own prompt. Run one agent, see it in two places.
 
 ## Connection
 
-One field: **Base URL**. Whatever answers OpenAI's `POST /v1/chat/completions`
-works.
+One field: **where PeDitX-AI is listening.**
 
 | | |
 | --- | --- |
-| Local gateway | `http://127.0.0.1:20128/v1` |
-| **Your router, by IP** | `http://192.168.1.1:8765/v1` |
-| PeDitX-AI or a public gateway | `https://api.example.com/v1` |
+| PeDitX-AI's own default | `http://127.0.0.1:8765` |
+| Another machine | `http://192.168.1.1:8765` |
 
-- **Plain HTTP is never upgraded to HTTPS.** There is no certificate theatre and
-  no hostname check — a service on `192.168.x.x` keeps working exactly as written.
-- **A pasted path wins.** `/v1`, `/chat/completions` or nothing at all is
-  accepted as written; `/v1` is never appended to `/v1`.
-- **The key is optional.** A LAN service with no auth runs fine — the request
-  then goes out with no `Authorization` header.
-- **Test & fetch models** calls `GET …/models`. A list comes back, the model
-  dropdown fills, and the first one is chosen if you had not picked one.
+That is all Goo asks for. The model endpoint, the key and the model id live in
+**PeDitX-AI's Settings** — Goo reads them back only to show you what it is
+about to speak as, and the key is never shown, copied or stored here.
 
-**First run:** no endpoint saved yet, so the Settings window opens itself.
-Put the address in, hit *Test & fetch models*, done. It stops happening the
-moment the address is saved.
+Plain HTTP is never upgraded to HTTPS: PeDitX-AI listens on localhost, and
+localhost is http.
+
+**First run:** Goo opens Settings. Put PeDitX-AI's address in, hit *Test
+connection*, done.
 
 ## What it does
 
 - 🫧 **A real character** — drawn frame by frame on a canvas: breathing, blinks,
   eyes that follow your cursor, a greeting on launch, 28 handcrafted sounds.
 - 💬 **Island chat** — type in the strip and read the reply where you are, or
-  open the full-screen window for a running conversation.
-- 🔴 **It says when it failed** — a timeout or a 500 turns the character red and
-  shows the reason instead of swallowing it. Connection problems come with a
-  *Settings* button.
-- 📎 **Drop a file on it** — the character turns into a box and swallows it; the
-  bytes go to the endpoint with your next message.
+  open the full-screen window for a running conversation. Both are PeDitX-AI
+  answering.
+- 🔧 **The agent runs, Goo narrates it** — when PeDitX-AI asks for a tool, Goo
+  shows it working and waits; up to eight steps, then the final wording.
+- 🔴 **It says when it failed** — PeDitX-AI not running, or a turn that did not
+  land, turns the character red and shows the reason instead of swallowing it.
+- 📎 **Drop a file on it** — the character turns into a box and swallows it;
+  the path goes to PeDitX-AI, which reads the file itself, under its own
+  access mode.
 - ⌨️ **One keypress** — a global shortcut reveals the island (`Ctrl+Shift+N`,
   off by default, yours to pick).
 - 🫥 **Invisible when idle** — hides away, peeks out when you hover the top edge,

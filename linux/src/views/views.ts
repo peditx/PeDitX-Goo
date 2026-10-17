@@ -188,17 +188,16 @@ function buildOverview(actions: ViewActions): ViewHost {
         ticker.sync(task);
       } else {
         const url = State.settings.backendUrl.trim();
-        const key = `${url}|${State.settings.model}`;
-        if (key !== cardKey) {
-          cardKey = key;
+        if (url !== cardKey) {
+          cardKey = url;
           mode = "card";
           clear(leftBody);
           leftBody.append(statusCard);
           statusDot.style.background = url ? "#22C55E" : "#F4505E";
-          statusText.textContent = url ? "Connected" : "Not connected yet";
+          statusText.textContent = url ? "PeDitX-AI" : "Not connected yet";
           statusSub.textContent = url
-            ? url + (State.settings.model ? ` · ${State.settings.model}` : "")
-            : "Open Settings and point this at your endpoint.";
+            ? `via ${url}`
+            : "Open Settings and point this at PeDitX-AI.";
         }
       }
 
@@ -379,7 +378,7 @@ function buildSettings(actions: ViewActions): ViewHost {
   const feedback = h("div", { style: "font-size:11px;padding:2px 0 0 2px" });
   const urlField = h("input", {
     type: "text",
-    placeholder: "http://192.168.1.1:8765/v1",
+    placeholder: "http://127.0.0.1:8765",
     spellcheck: "false",
     autocomplete: "off",
     style: "flex:1 1 auto;min-width:0;background:#1E2024;color:#ECEDEF;"
@@ -410,17 +409,13 @@ function buildSettings(actions: ViewActions): ViewHost {
     State.settings.backendUrl = urlField.value.trim();
     void Bridge.saveSettings(State.settings);
     clear(feedback);
-    feedback.append(h("div", { style: "color:#9a9fa8", text: "Contacting the endpoint…" }));
-    void Bridge.gooModels()
-      .then((list) => {
-        if (!State.settings.model && list.length) {
-          State.settings.model = list[0];
-          void Bridge.saveSettings(State.settings);
-        }
+    feedback.append(h("div", { style: "color:#9a9fa8", text: "Contacting PeDitX-AI…" }));
+    void Bridge.agentStatus()
+      .then((s) => {
         clear(feedback);
         feedback.append(h("div", {
           style: "color:#22C55E",
-          text: list.length ? `Connected — ${list.length} model(s).` : "Connected — no models listed.",
+          text: `PeDitX-AI: ${s.model || "no model set"} · access ${s.mode}`,
         }));
       })
       .catch((err: unknown) => {
@@ -435,10 +430,10 @@ function buildSettings(actions: ViewActions): ViewHost {
   const rows = h(
     "div",
     { class: "settings-rows" },
-    // The endpoint itself, here rather than only in the Settings window: an
-    // address gets retyped often enough, and it is not a secret.
+    // Where PeDitX-AI is listening. The one thing Goo needs to know; the
+    // endpoint, the key and the model are PeDitX-AI's own.
     h("div", { class: "settings-row" },
-      backendBadge, h("span", { text: "URL" }), urlField, testBtn),
+      backendBadge, h("span", { text: "PeDitX-AI" }), urlField, testBtn),
     feedback,
     h("div", { class: "settings-row" }, soundSwitch, h("span", { text: "Sound" }), volume),
     h(
@@ -458,7 +453,6 @@ function buildSettings(actions: ViewActions): ViewHost {
         title: "Open Settings",
         onclick: () => actions.openSettingsWindow(),
       },
-      backendBadge,
       h("div", { class: "grow" }),
       h("span", {
         class: "link-btn",
@@ -487,7 +481,7 @@ function buildSettings(actions: ViewActions): ViewHost {
       clear(backendBadge);
       backendBadge.append(
         dot(s.backendUrl.trim() ? "#22C55E" : "#F4505E", 6),
-        h("span", { text: "Backend" }),
+        h("span", { text: "Agent" }),
       );
     },
   };

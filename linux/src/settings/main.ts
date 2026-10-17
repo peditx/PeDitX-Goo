@@ -1,13 +1,10 @@
 // Settings window — the place where anything that writes to disk is confirmed.
-// One section connects the island to an endpoint; the rest is preferences.
+// One section points the island at PeDitX-AI; the rest is preferences.
 
 import "./settings.css";
-import { Bridge, onEvent } from "../core/bridge";
+import { Bridge, onEvent, type AgentStatus } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
-
-/** Key of the optional bearer token. The address itself lives in `settings`. */
-const API_KEY = "goo-api-key";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -34,40 +31,27 @@ function statusDot(ok: boolean): HTMLElement {
   return h("i", { class: "dot", style: `background:${ok ? "#22c55e" : "#f4505e"}` });
 }
 
-// ── Backend section ─────────────────────────────────────────────────────────
+// ── PeDitX-AI section ────────────────────────────────────────────────────────
+//
+// Goo has nothing of its own to configure. One field says where PeDitX-AI is
+// listening; everything else on this page is PeDitX-AI read back, so the user
+// can see what the companion is about to speak as.
 
 function backendSection(): HTMLElement {
   const dot = statusDot(false);
   const state = h("span", { class: "hint", text: "Not connected yet." });
+  const readout = h("div", { class: "hint" });
   const feedback = h("div", {});
 
   const urlField = h("input", {
     type: "text",
-    placeholder: "http://192.168.1.1:8765/v1",
-    style: "flex:1 1 auto;min-width:0",
-    autocomplete: "off",
-    spellcheck: "false",
-  }) as HTMLInputElement;
-  const keyField = h("input", {
-    type: "password",
-    placeholder: "API key (optional)",
-    style: "flex:1 1 auto;min-width:0",
-    autocomplete: "off",
-    spellcheck: "false",
-  }) as HTMLInputElement;
-  const modelList = h("datalist", { id: "goo-models" });
-  const modelField = h("input", {
-    type: "text",
-    list: "goo-models",
-    placeholder: "model id",
+    placeholder: "http://127.0.0.1:8765",
     style: "flex:1 1 auto;min-width:0",
     autocomplete: "off",
     spellcheck: "false",
   }) as HTMLInputElement;
 
-  const saveKey = h("button", { class: "primary", text: "Save key" });
-  const clearKey = h("button", { class: "danger", text: "Remove" });
-  const testBtn = h("button", { text: "Test & fetch models" });
+  const testBtn = h("button", { text: "Test connection" });
   const openChat = h("button", { text: "Open chat" });
 
   function note(kind: "ok" | "err" | "", text: string) {
@@ -75,23 +59,26 @@ function backendSection(): HTMLElement {
     feedback.append(h("div", { class: kind ? `notice ${kind}` : "notice", text }));
   }
 
+  function paintReadout(s: AgentStatus | null) {
+    clear(readout);
+    if (!s) return;
+    readout.append(h("div", {
+      text: `Endpoint: ${s.endpoint || "not set in PeDitX-AI"}`,
+    }));
+    readout.append(h("div", {
+      text: `Model: ${s.model || "not set in PeDitX-AI"}`
+        + `  ·  access: ${s.mode}`
+        + `  ·  key: ${s.hasKey ? "saved" : "none"}`,
+    }));
+  }
+
   function refresh() {
     const url = settings.backendUrl.trim();
     dot.style.background = url ? "#22c55e" : "#f4505e";
-    state.textContent = url ? `Address saved — ${url}` : "Not connected yet.";
+    state.textContent = url ? `PeDitX-AI at ${url}` : "No address set.";
     if (document.activeElement !== urlField) urlField.value = settings.backendUrl;
-    if (document.activeElement !== modelField) modelField.value = settings.model;
-    void Bridge.secretPresent(API_KEY).then((has) => {
-      const present = has ?? false;
-      if (document.activeElement !== keyField) {
-        keyField.value = "";
-        keyField.placeholder = present ? "••••••••  (saved)" : "API key (optional)";
-      }
-      clearKey.style.display = present ? "" : "none";
-    });
   }
 
-  /** The address lives in Settings, so it round-trips and stays visible. */
   async function commitUrl() {
     settings.backendUrl = urlField.value.trim();
     await save();
@@ -99,57 +86,22 @@ function backendSection(): HTMLElement {
   }
 
   urlField.addEventListener("change", () => void commitUrl());
-  modelField.addEventListener("change", () => {
-    settings.model = modelField.value.trim();
-    void save();
-    refresh();
-  });
-
-  saveKey.addEventListener("click", async () => {
-    const value = keyField.value.trim();
-    clear(feedback);
-    if (!value) return;
-    try {
-      await Bridge.secretSet(API_KEY, value);
-      note("ok", "Saved. It never touches disk.");
-      refresh();
-    } catch (err) {
-      note("err", `Could not save: ${String(err)}`);
-    }
-  });
-
-  clearKey.addEventListener("click", async () => {
-    clear(feedback);
-    try {
-      await Bridge.secretClear(API_KEY);
-      note("ok", "Key removed.");
-      refresh();
-    } catch (err) {
-      note("err", `Could not remove: ${String(err)}`);
+  urlField.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      void commitUrl();
+      urlField.blur();
     }
   });
 
   testBtn.addEventListener("click", async () => {
     await commitUrl();
-    note("", "Contacting the endpoint…");
+    note("", "Contacting PeDitX-AI…");
     try {
-      const list = await Bridge.gooModels();
-      clear(modelList);
-      for (const id of list) modelList.append(h("option", { value: id }));
-      // Picking the first is what makes an install work before anything else
-      // is chosen; the field stays editable.
-      if (!settings.model && list.length > 0) {
-        settings.model = list[0];
-        await save();
-        refresh();
-      }
-      note(
-        "ok",
-        list.length > 0
-          ? `Connected — ${list.length} model${list.length === 1 ? "" : "s"}.`
-          : "Connected, but the endpoint listed no models — type the model id by hand.",
-      );
+      const s = await Bridge.agentStatus();
+      paintReadout(s);
+      note("ok", "PeDitX-AI answered.");
     } catch (err) {
+      paintReadout(null);
       note("err", String(err).replace(/^Error:\s*/, ""));
     }
   });
@@ -157,34 +109,22 @@ function backendSection(): HTMLElement {
   openChat.addEventListener("click", () => void Bridge.openGooWindow());
 
   void refresh();
-  // The island writes the same settings object, so this panel has to re-read
-  // it — otherwise the address shown here is the one from before the change.
-  READERS.push(() => refresh());
 
   return h(
     "section",
     {},
-    h("h2", {}, dot, h("span", { text: "Endpoint" })),
+    h("h2", {}, dot, h("span", { text: "PeDitX-AI" })),
     state,
     h("div", {
       class: "hint",
-      text: "Any OpenAI-compatible Chat Completions endpoint: 9Router, PeDitX-AI, or a service on your own LAN. Plain http is fine — nothing forces https, and nothing is upgraded for you.",
+      text: "Goo is PeDitX-AI's companion, not a second assistant: it has no model, no key and no personality of its own. It asks PeDitX-AI, and PeDitX-AI answers with its own memory, Skills and access mode.",
     }),
-    h("div", { class: "row" }, h("label", { text: "Base URL" }), urlField, testBtn),
+    h("div", { class: "row" }, h("label", { text: "Address" }), urlField, testBtn),
     h("div", {
       class: "hint",
-      text: "Local: http://127.0.0.1:20128/v1  |  Router or LAN: http://192.168.1.1:8765/v1  |  Public: https://api.example.com/v1  — a pasted /v1 or /chat/completions path is accepted as written.",
+      text: "Where PeDitX-AI listens. Its own default is http://127.0.0.1:8765 — the endpoint, the key and the model live in PeDitX-AI's Settings, not here.",
     }),
-    h("div", { class: "row" }, h("label", { text: "Key" }), keyField, saveKey, clearKey),
-    h("div", {
-      class: "hint",
-      text: "Optional: a service on your LAN often needs none, and the request then goes out without an Authorization header. Held in the system keyring, never on disk.",
-    }),
-    h("div", { class: "row" }, h("label", { text: "Model" }), modelField, modelList),
-    h("div", {
-      class: "hint",
-      text: "Filled in by Test & fetch models. Sent with every turn; leave it as the endpoint's first model if you are not sure.",
-    }),
+    readout,
     h("div", { class: "row" }, openChat),
     feedback,
   );

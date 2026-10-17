@@ -1,34 +1,43 @@
-// PeDitX-Goo's backend — any OpenAI-compatible Chat Completions endpoint.
-// 9Router, PeDitX-AI, or a service on the LAN reached by plain `http://`
-// (e.g. `http://192.168.1.1:8765/v1`).
+// PeDitX-Goo is a shell. PeDitX-AI is the agent.
 //
-// Everything happens here: the bearer token is read out of the Secret Service
-// and never crosses the IPC boundary, so the chat window only ever learns
-// "configured" or "not configured". The address is passed in from Settings —
-// it is not a secret — and there is deliberately no TLS special-casing:
-// reqwest is built with `default-features = false`, so `http://` goes out as
-// plain HTTP exactly as written and nothing ever upgrades it.
+// Everything here talks to PeDitX-AI's own local service — the same process
+// its desktop window runs, `127.0.0.1:8765` by default — so the persona, the
+// memory, the Skills, the access mode and the model all stay PeDitX-AI's.
+// Goo holds no endpoint, no API key and no model id: it has none of its own,
+// which is the point. Settings only says where PeDitX-AI is listening.
+//
+// The loop below mirrors `web/index.html`'s `send()`: ask, run whatever tools
+// the answer asks for, ask again, up to eight times, then one tool-free turn
+// for the final wording. One difference, marked where it happens: this side
+// cannot click a confirmation dialog, so `ask` mode denies instead of asking.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::ipc::Channel;
 
-use crate::chat::{self, Chat, ChatContext, ChatReply, SYSTEM_PROMPT};
-use crate::secrets;
+use crate::chat::{Chat, ChatContext, ChatReply};
 
-/// No overall request timeout on the streaming path: a turn can run long.
-/// Only the connection is bounded — and the stream itself is bounded below.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-/// The endpoint has stopped sending. Bursts happen, so be generous.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
-/// Absolute ceiling for one turn, so a wedged stream cannot pin the window.
-const MAX_TURN: Duration = Duration::from_secs(600);
-/// `GET /models` is a probe as much as a lookup — keep it snappy.
-const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Where PeDitX-AI listens unless the user says otherwise.
+pub const DEFAULT_AGENT: &str = "http://127.0.0.1:8765";
 
-const API_KEY: &str = "goo-api-key";
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// One turn can run long — the model thinks, then works. Matched to the 600 s
+/// ceiling PeDitX-AI itself puts on an upstream request.
+const TURN_TIMEOUT: Duration = Duration::from_secs(600);
+/// Steps before Goo stops asking. The web UI uses 8; this mirrors it.
+const MAX_STEPS: usize = 8;
+
+/// The tools every access mode may still run. Same list as the web UI.
+const READ_ONLY: &[&str] = &[
+    "system_info",
+    "list_dir",
+    "read_file",
+    "read_skill",
+    "read_skill_file",
+    "ssh_command",
+];
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -37,461 +46,438 @@ pub enum GooEvent {
     Done,
 }
 
-/// The settings row and the first-run hint both read this. The key is
-/// optional — a LAN service often has none — so only the address counts.
-pub fn configured(url: &str) -> bool {
-    !url.trim().is_empty()
+/// What Settings shows: PeDitX-AI's own view of itself, never Goo's to change.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStatus {
+    /// PeDitX-AI's model endpoint — read back, not edited here.
+    pub endpoint: String,
+    pub model: String,
+    pub mode: String,
+    pub has_key: bool,
 }
 
-/// Base URL → the API root, i.e. everything before `/chat/completions`.
-/// Accepts the path already being pasted in. Pure, so the tests never have to
-/// touch the settings or the Secret Service.
-fn api_root(raw: Option<&str>) -> Result<String, String> {
-    let raw = raw.ok_or_else(|| "Backend URL missing. Open settings.".to_string())?;
+/// The address is user input, so only http(s) survives it. A trailing slash
+/// and a pasted `/` path are both normalised away.
+fn base(raw: Option<&str>) -> Result<String, String> {
+    let raw = raw.ok_or_else(|| "PeDitX-AI address missing. Open settings.".to_string())?;
     let base = raw.trim().trim_end_matches('/');
     if base.is_empty() {
-        return Err("Backend URL missing. Open settings.".into());
+        return Err("PeDitX-AI address missing. Open settings.".into());
     }
-    // Set by the user, but still untrusted input: no file://, no garbage.
     if !(base.starts_with("http://") || base.starts_with("https://")) {
-        return Err("Backend URL must start with http:// or https://.".into());
+        return Err("PeDitX-AI address must start with http:// or https://.".into());
     }
-    // A pasted path wins over the default, so `…/v1` does not become `…/v1/v1`.
-    for suffix in ["/v1/chat/completions", "/chat/completions", "/v1"] {
-        if let Some(head) = base.strip_suffix(suffix) {
-            return Ok(head.trim_end_matches('/').to_string());
-        }
-    }
-    Ok(format!("{base}/v1"))
+    Ok(base.to_string())
 }
 
-fn chat_url(raw: Option<&str>) -> Result<String, String> {
-    Ok(format!("{}/chat/completions", api_root(raw)?))
+/// The settings row and the chat empty state both read this: an address alone
+/// means "pointed somewhere", which is not the same as PeDitX-AI answering.
+pub fn configured(url: &str) -> bool {
+    base(Some(url)).is_ok()
 }
 
-fn models_url(raw: Option<&str>) -> Result<String, String> {
-    Ok(format!("{}/models", api_root(raw)?))
-}
-
-fn endpoint(url: &str) -> Result<String, String> {
-    chat_url(Some(url))
-}
-
-/// No key configured is not an error — plenty of gateways on a LAN have none.
-fn token() -> Option<String> {
-    secrets::get(API_KEY)
-}
-
-// ── Discovery ────────────────────────────────────────────────────────────────
-
-/// `GET /models`. Doubles as the Settings "test connection" button: if it
-/// answers, the address and the key are right. An empty list means connected
-/// but unhelpful, which is not the same as failing.
-pub async fn models(url: &str) -> Result<Vec<String>, String> {
-    fetch_models(url, PROBE_TIMEOUT).await
-}
-
-async fn fetch_models(url: &str, timeout: Duration) -> Result<Vec<String>, String> {
-    let url = models_url(Some(url))?;
-
-    let client = reqwest::Client::builder()
+fn client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(timeout)
+        .timeout(TURN_TIMEOUT)
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+}
 
-    let mut request = client.get(&url);
-    if let Some(token) = token() {
-        request = request.bearer_auth(token);
-    }
-    let response = request
+// ── Talking to PeDitX-AI ─────────────────────────────────────────────────────
+
+/// The per-launch token PeDitX-AI mints. It is handed to the browser by being
+/// substituted into the served page, so reading the page is how any local
+/// client gets it — there is no other door, on purpose.
+async fn token(client: &reqwest::Client, base: &str) -> Result<String, String> {
+    let page = client
+        .get(base)
         .send()
         .await
-        .map_err(|e| format!("Goo unreachable: {e}"))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        return Err(surface(response, status).await);
-    }
-
-    let value: Value = response
-        .json()
+        .map_err(|_| format!("{NOT_RUNNING} ({base})"))?
+        .text()
         .await
-        .map_err(|e| format!("Bad API response: {e}"))?;
-    let mut ids: Vec<String> = value
-        .pointer("/data")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|m| m.get("id").and_then(Value::as_str).map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    ids.sort();
-    ids.dedup();
-    Ok(ids)
+        .map_err(|_| format!("{NOT_RUNNING} ({base})"))?;
+    let start = page
+        .find("TOKEN='")
+        .map(|i| i + "TOKEN='".len())
+        .ok_or_else(|| format!("{NOT_RUNNING} (no token in the page)"))?;
+    let end = page[start..]
+        .find('\'')
+        .map(|i| start + i)
+        .ok_or_else(|| format!("{NOT_RUNNING} (token truncated)"))?;
+    Ok(page[start..end].to_string())
 }
 
-// ── Full-screen chat window ──────────────────────────────────────────────────
-//
-// The caller owns the transcript and hands it back in full each time, so
-// nothing has to live in Rust between messages.
+const NOT_RUNNING: &str = "PeDitX-AI is not running. Start it, then try again.";
 
-/// One streaming turn. `model` comes from Settings; an unset model is refused
-/// loudly rather than sent as an empty string.
-pub async fn send(
-    url: &str,
-    history: Vec<Value>,
-    model: String,
-    prompt: String,
-    channel: Channel<GooEvent>,
-) -> Result<(), String> {
-    let url = endpoint(url)?;
-    let model = require_model(model)?;
-
-    let mut messages = history;
-    messages.push(json!({ "role": "user", "content": prompt }));
-
-    let client = reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let mut request = client
-        .post(&url)
+/// One authenticated JSON call. The error string is PeDitX-AI's own, which is
+/// what tells the user whether the model, the key or the network is at fault.
+async fn post(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    path: &str,
+    body: &Value,
+) -> Result<Value, String> {
+    let response = client
+        .post(format!("{base}{path}"))
         .header("content-type", "application/json")
-        .json(&json!({ "model": model, "stream": true, "messages": messages }));
-    if let Some(token) = token() {
-        request = request.bearer_auth(token);
-    }
-
-    let response = request
+        .header("authorization", format!("Bearer {token}"))
+        .json(body)
         .send()
         .await
-        .map_err(|e| format!("Goo unreachable: {e}"))?;
+        .map_err(|e| format!("Could not reach PeDitX-AI: {e}"))?;
 
     let status = response.status();
-    if !status.is_success() {
-        return Err(surface(response, status).await);
-    }
-
-    let mut response = response;
-    let mut pending = String::new();
-    let started = Instant::now();
-    loop {
-        if started.elapsed() > MAX_TURN {
-            return Err("Goo stopped responding (10 minute limit).".into());
-        }
-        let chunk = tokio::time::timeout(IDLE_TIMEOUT, response.chunk())
-            .await
-            .map_err(|_| "Goo went quiet for two minutes.".to_string())?
-            .map_err(|e| format!("Connection lost: {e}"))?;
-
-        // Clean end of stream — not every server sends [DONE].
-        let Some(chunk) = chunk else { break };
-        pending.push_str(&String::from_utf8_lossy(&chunk));
-
-        while let Some(idx) = pending.find('\n') {
-            let line: String = pending.drain(..=idx).collect();
-            match handle(line.trim_end(), &channel)? {
-                Stream::Continue => {}
-                Stream::Finished => {
-                    let _ = channel.send(GooEvent::Done);
-                    return Ok(());
-                }
-            }
-        }
-    }
-
-    let _ = channel.send(GooEvent::Done);
-    Ok(())
-}
-
-enum Stream {
-    Continue,
-    Finished,
-}
-
-/// One SSE line. Anything that is not a `data:` line (comments, `event:`) is
-/// silently skipped, as the spec allows.
-fn handle(line: &str, channel: &Channel<GooEvent>) -> Result<Stream, String> {
-    let Some(data) = line.strip_prefix("data:").map(str::trim_start) else {
-        return Ok(Stream::Continue);
-    };
-    if data == "[DONE]" {
-        return Ok(Stream::Finished);
-    }
-    let Ok(value) = serde_json::from_str::<Value>(data) else {
-        return Ok(Stream::Continue);
-    };
-
-    // An error object arrives mid-stream instead of as a status code.
-    if let Some(message) = value.pointer("/error/message").and_then(Value::as_str) {
-        return Err(message.to_string());
-    }
-    if let Some(text) = value
-        .pointer("/choices/0/delta/content")
-        .and_then(Value::as_str)
-    {
-        if !text.is_empty() {
-            channel
-                .send(GooEvent::Delta {
-                    text: text.to_string(),
-                })
-                .map_err(|_| "window closed".to_string())?;
-        }
-    }
-    Ok(Stream::Continue)
-}
-
-/// Surface the server's own message, which is what makes a bad key or a
-/// mis-typed address obvious.
-async fn surface(response: reqwest::Response, status: reqwest::StatusCode) -> String {
     let text = response.text().await.unwrap_or_default();
-    let detail = serde_json::from_str::<Value>(&text)
+    if !status.is_success() {
+        let detail = serde_json::from_str::<Value>(&text)
+            .ok()
+            .and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_string))
+            .unwrap_or_else(|| text.chars().take(200).collect());
+        return Err(if detail.is_empty() {
+            format!("PeDitX-AI answered {status}")
+        } else {
+            detail
+        });
+    }
+    serde_json::from_str::<Value>(&text).map_err(|e| format!("Bad reply from PeDitX-AI: {e}"))
+}
+
+async fn get(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    path: &str,
+) -> Result<Value, String> {
+    let response = client
+        .get(format!("{base}{path}"))
+        .header("authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Could not reach PeDitX-AI: {e}"))?;
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("PeDitX-AI answered {status}"));
+    }
+    serde_json::from_str::<Value>(&text).map_err(|e| format!("Bad reply from PeDitX-AI: {e}"))
+}
+
+/// PeDitX-AI's own configuration, read back for the status rows. The key is
+/// reported as present or absent — never its value, which is not Goo's.
+pub async fn status(url: &str) -> Result<AgentStatus, String> {
+    let base = base(Some(url))?;
+    let client = client()?;
+    let token = token(&client, &base).await?;
+    let config = get(&client, &base, &token, "/api/config").await?;
+    let text = |key: &str| {
+        config
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    Ok(AgentStatus {
+        endpoint: text("endpoint"),
+        model: text("model"),
+        mode: text("mode"),
+        has_key: config
+            .get("has_key")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+/// One `POST /api/chat`: PeDitX-AI prompts its own model with its own system
+/// prompt, persona, memory and Skill index. Goo only ever sees the answer.
+async fn ask(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    history: &[Value],
+    no_tools: bool,
+) -> Result<Value, String> {
+    let mut body = json!({ "messages": history });
+    if no_tools {
+        body["no_tools"] = json!(true);
+    }
+    let reply = post(client, base, token, "/api/chat", &body).await?;
+    reply
+        .get("message")
+        .cloned()
+        .ok_or_else(|| "PeDitX-AI returned no message.".into())
+}
+
+/// `POST /api/execute`. PeDitX-AI enforces the access mode itself; the list
+/// below only mirrors it so `ask` can deny before a dialog cannot be shown.
+async fn run_tool(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    mode: &str,
+    call: &Value,
+) -> Value {
+    let function = call.get("function").unwrap_or(&Value::Null);
+    let name = function.get("name").and_then(Value::as_str).unwrap_or("");
+    let args: Value = function
+        .get("arguments")
+        .and_then(Value::as_str)
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or_else(|| json!({}));
+
+    // `ask` means "stop and ask the user" — and Goo has nowhere to stop and
+    // ask. Denying is the only answer that is not a silent yes.
+    // ponytail: surface an approval card in the island and retry the call here;
+    // the island already draws an approval badge for a waiting pill.
+    if mode == "ask" && !READ_ONLY.contains(&name) {
+        return json!({
+            "denied": true,
+            "message": "The companion cannot ask for approval. Approve it in the PeDitX-AI window, or set access mode to Full.",
+        });
+    }
+
+    match post(
+        client,
+        base,
+        token,
+        "/api/execute",
+        &json!({ "name": name, "args": args, "mode": mode }),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(why) => json!({ "error": why }),
+    }
+}
+
+/// One full turn: ask, run the tools it asks for, ask again — then one
+/// tool-free pass so the last thing Goo shows is an answer, not a tool call.
+/// Returns the final assistant message, already pushed onto `history`.
+async fn run(base: &str, history: &mut Vec<Value>) -> Result<Value, String> {
+    trim(history);
+    let client = client()?;
+    let token = token(&client, base).await?;
+    let mode = get(&client, base, &token, "/api/config")
+        .await
         .ok()
-        .and_then(|v| {
-            v.pointer("/error/message")
-                .or_else(|| v.pointer("/message"))
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| text.chars().take(200).collect());
-    if detail.is_empty() {
-        return format!("Goo API {status}");
+        .and_then(|c| c.get("mode").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| "full".into());
+
+    let mut message = ask(&client, base, &token, history, false).await?;
+    for _ in 0..MAX_STEPS {
+        history.push(message.clone());
+        let calls = message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if calls.is_empty() {
+            return Ok(message);
+        }
+        for call in &calls {
+            let result = run_tool(&client, base, &token, &mode, call).await;
+            history.push(json!({
+                "role": "tool",
+                "tool_call_id": call.get("id").and_then(Value::as_str).unwrap_or(""),
+                "content": result.to_string(),
+            }));
+        }
+        message = ask(&client, base, &token, history, false).await?;
     }
-    format!("Goo API {status}: {detail}")
+
+    // Out of steps: ask once more with tools off so the user still gets prose.
+    history.push(message);
+    message = ask(&client, base, &token, history, true).await?;
+    history.push(message.clone());
+    Ok(message)
 }
 
-fn require_model(model: String) -> Result<String, String> {
-    let model = model.trim();
-    if model.is_empty() {
-        return Err("No model selected. Open settings and fetch the model list.".into());
+/** PeDitX-AI refuses more than 80 messages, so the oldest turns go first —
+/// a turn at a time, so a tool call never loses the result it asked for. */
+fn trim(messages: &mut Vec<Value>) {
+    const LIMIT: usize = 60;
+    while messages.len() > LIMIT {
+        let cut = messages
+            .iter()
+            .skip(1)
+            .position(|m| m.get("role").and_then(Value::as_str) == Some("user"))
+            .map(|i| i + 1)
+            .unwrap_or(messages.len());
+        if cut >= messages.len() {
+            break;
+        }
+        messages.drain(..cut);
     }
-    Ok(model.to_string())
 }
 
-// ── Island chat ──────────────────────────────────────────────────────────────
-//
-// The island asks one question and waits for the whole reply: no stream, no
-// channel, no transcript of its own.
+fn text_of(message: &Value) -> String {
+    match message.get("content") {
+        Some(Value::String(text)) => text.trim().to_string(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| item.get("text").and_then(Value::as_str).unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string(),
+        _ => String::new(),
+    }
+}
 
-/// One island turn against the backend.
+// ── The two callers ──────────────────────────────────────────────────────────
+
+/// The island asks one question and waits for the whole reply. The transcript
+/// is Rust's; the dropped file is passed by path, because reading files is
+/// PeDitX-AI's job, not the shell's.
 pub async fn chat(
     url: &str,
     history: &Chat,
-    model: String,
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, String> {
-    let url = endpoint(url)?;
-    let model = require_model(model)?;
+    let base = base(Some(url))?;
+    let mut messages = history.snapshot();
 
-    let mut content = chat::context_blocks(history, context.as_ref());
-    content.push(json!({ "type": "text", "text": query }));
-
-    history.push(json!({ "role": "user", "content": content }));
-
-    let request = json!({ "model": model, "messages": turn(&history.snapshot()) });
-
-    let client = reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(MAX_TURN)
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let mut http = client.post(&url).json(&request);
-    if let Some(token) = token() {
-        http = http.bearer_auth(token);
+    let mut content = query;
+    if messages.is_empty() {
+        if let Some(note) = context_note(&context) {
+            content = format!("{note}\n\n{content}");
+        }
     }
+    messages.push(json!({ "role": "user", "content": content }));
 
-    let response = http
-        .send()
-        .await
-        .map_err(|e| format!("Goo unreachable: {e}"))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let why = surface(response, status).await;
-        history.pop();
-        return Err(why);
-    }
-
-    let value: Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Bad API response: {e}"))?;
-    if let Some(why) = value.pointer("/error/message").and_then(Value::as_str) {
-        history.pop();
-        return Err(why.to_string());
-    }
-
-    let text = value
-        .pointer("/choices/0/message/content")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    // A failed turn is dropped whole: the question is still worth asking again
+    // once PeDitX-AI is back, and half a transcript is worse than none.
+    let message = run(&base, &mut messages).await?;
+    let text = text_of(&message);
     if text.is_empty() {
-        history.pop();
-        return Err("No response text.".into());
+        return Err("PeDitX-AI returned an empty answer.".into());
     }
-
-    // Store it in the same shape the next turn expects, so history reads back
-    // the way it went in.
-    history.push(json!({ "role": "assistant", "content": [{ "type": "text", "text": text }] }));
+    history.replace(messages);
     Ok(ChatReply { text })
 }
 
-/// Stored history → OpenAI messages. The system prompt rides every request.
-fn turn(history: &[Value]) -> Vec<Value> {
-    let mut out = Vec::with_capacity(history.len() + 1);
-    out.push(json!({ "role": "system", "content": SYSTEM_PROMPT }));
-    for message in history {
-        out.push(json!({
-            "role": message.get("role").and_then(Value::as_str).unwrap_or("user"),
-            "content": parts(message.get("content")),
-        }));
-    }
-    out
-}
+/// The full-screen window. The transcript is the window's to hold, so it is
+/// handed in and handed back rather than kept here.
+pub async fn send(
+    url: &str,
+    mut history: Vec<Value>,
+    prompt: String,
+    channel: Channel<GooEvent>,
+) -> Result<(), String> {
+    let base = base(Some(url))?;
+    history.push(json!({ "role": "user", "content": prompt }));
 
-fn parts(content: Option<&Value>) -> Value {
-    match content {
-        Some(Value::Array(blocks)) => Value::Array(blocks.iter().map(part).collect()),
-        Some(Value::String(text)) => json!(text),
-        _ => json!(""),
-    }
-}
-
-/// One stored block → one OpenAI part. Text goes across as text; images and
-/// PDFs are inlined, because the backend cannot open a path on this machine.
-fn part(block: &Value) -> Value {
-    let kind = block.get("type").and_then(Value::as_str).unwrap_or("");
-    match kind {
-        "image" | "document" => {
-            let source = &block["source"];
-            let media = source["media_type"]
-                .as_str()
-                .unwrap_or("application/octet-stream");
-            let url = format!(
-                "data:{media};base64,{}",
-                source["data"].as_str().unwrap_or("")
-            );
-            if kind == "image" {
-                json!({ "type": "image_url", "image_url": { "url": url } })
-            } else {
-                // OpenAI's file part. If the endpoint rejects it the turn fails
-                // loudly instead of silently dropping the attachment.
-                json!({ "type": "file", "file": { "filename": "attachment", "file_data": url } })
+    match run(&base, &mut history).await {
+        Ok(message) => {
+            let text = text_of(&message);
+            if !text.is_empty() {
+                channel
+                    .send(GooEvent::Delta { text })
+                    .map_err(|_| "window closed".to_string())?;
             }
+            let _ = channel.send(GooEvent::Done);
+            Ok(())
         }
-        "tool_use" => json!({
-            "type": "text",
-            "text": format!("Tool call {}: {}", block["name"].as_str().unwrap_or("?"), block["input"])
-        }),
-        "tool_result" => json!({ "type": "text", "text": tool_text(block) }),
-        _ => json!({ "type": "text", "text": block["text"].as_str().unwrap_or("") }),
+        Err(why) => {
+            let _ = channel.send(GooEvent::Done);
+            Err(why)
+        }
     }
 }
 
-/// tool_result content is a string, or a list of blocks.
-fn tool_text(block: &Value) -> String {
-    match block.get("content") {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Array(items)) => items
-            .iter()
-            .map(|item| item["text"].as_str().unwrap_or(""))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => String::new(),
+/// A dropped file or a focused window, as the first line of a turn. PeDitX-AI
+/// reads the file itself — with its own tools, under its own access mode.
+fn context_note(context: &Option<ChatContext>) -> Option<String> {
+    match context {
+        Some(ChatContext::File { name, path }) => Some(format!(
+            "The companion dropped a file for you: {name} ({path})"
+        )),
+        Some(ChatContext::Window {
+            app_name,
+            title,
+            url,
+        }) => Some(match url {
+            Some(url) => format!("The companion is looking at — {app_name}, {title}, {url}"),
+            None => format!("The companion is looking at — {app_name}, {title}"),
+        }),
+        None => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{chat_url, models_url, part, turn};
+    use super::{base, context_note, text_of, ChatContext};
     use serde_json::json;
 
-    /// The URL field is user input; only http(s) survives it, and whatever
-    /// path they pasted keeps working.
+    /// The address is user input: only http(s), no trailing slash, no path
+    /// games.
     #[test]
-    fn chat_url_requires_http_and_accepts_a_pasted_path() {
-        assert!(chat_url(None).is_err(), "no URL configured");
-        assert!(chat_url(Some("   ")).is_err(), "blank URL refused");
-        assert!(
-            chat_url(Some("file:///etc")).is_err(),
-            "non-http scheme refused"
-        );
+    fn the_address_must_be_http_and_is_normalised() {
+        assert!(base(None).is_err(), "no address configured");
+        assert!(base(Some("   ")).is_err(), "blank address refused");
+        assert!(base(Some("file:///etc")).is_err(), "non-http scheme refused");
 
         assert_eq!(
-            chat_url(Some("https://agent.example:8642/")).unwrap(),
-            "https://agent.example:8642/v1/chat/completions"
+            base(Some("http://127.0.0.1:8765/")).unwrap(),
+            "http://127.0.0.1:8765"
         );
         assert_eq!(
-            chat_url(Some("http://192.168.1.1:8765")).unwrap(),
-            "http://192.168.1.1:8765/v1/chat/completions"
-        );
-        assert_eq!(
-            chat_url(Some("https://agent.example:8642/v1/chat/completions")).unwrap(),
-            "https://agent.example:8642/v1/chat/completions"
-        );
-        // A pasted `/v1` (9Router's shape) must not become `/v1/v1/…`.
-        assert_eq!(
-            chat_url(Some("http://127.0.0.1:20128/v1")).unwrap(),
-            "http://127.0.0.1:20128/v1/chat/completions"
-        );
-        assert_eq!(
-            chat_url(Some("http://192.168.1.1:8765/v1/")).unwrap(),
-            "http://192.168.1.1:8765/v1/chat/completions"
+            base(Some("  http://192.168.1.9:8765  ")).unwrap(),
+            "http://192.168.1.9:8765"
         );
     }
 
-    /// `/models` mirrors `chat_url`'s suffix handling, or the probe hits a
-    /// path that never existed.
+    /// The token is substituted into the served page as `TOKEN='…'`. That is
+    /// the only place it ever appears, so that is what gets parsed.
     #[test]
-    fn models_url_follows_the_same_rules() {
-        assert_eq!(
-            models_url(Some("http://192.168.1.1:8765")).unwrap(),
-            "http://192.168.1.1:8765/v1/models"
-        );
-        assert_eq!(
-            models_url(Some("http://127.0.0.1:20128/v1")).unwrap(),
-            "http://127.0.0.1:20128/v1/models"
-        );
-        assert_eq!(
-            models_url(Some("https://api.example.com/v1/chat/completions")).unwrap(),
-            "https://api.example.com/v1/models"
-        );
-        assert!(models_url(None).is_err());
+    fn the_token_is_read_out_of_the_page() {
+        let page = "<script>const TOKEN='abc-123_XYZ';</script>";
+        let start = page.find("TOKEN='").unwrap() + "TOKEN='".len();
+        let end = start + page[start..].find('\'').unwrap();
+        assert_eq!(&page[start..end], "abc-123_XYZ");
     }
 
-    /// The island stores block-shaped history; the wire wants OpenAI parts.
-    /// Every block a turn can write has to come out the other side.
+    /// A dropped file is handed over by path — Goo never reads it, and never
+    /// base64s it across the boundary.
     #[test]
-    fn history_translates_from_blocks_to_openai_parts() {
+    fn a_dropped_file_becomes_one_line_of_text() {
         assert_eq!(
-            part(&json!({"type": "text", "text": "hi"})),
-            json!({"type": "text", "text": "hi"})
+            context_note(&Some(ChatContext::File {
+                name: "notes.txt".into(),
+                path: "/tmp/notes.txt".into(),
+            }))
+            .unwrap(),
+            "The companion dropped a file for you: notes.txt (/tmp/notes.txt)"
         );
-        assert_eq!(
-            part(
-                &json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAA"}})
-            ),
-            json!({"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}})
-        );
-        assert_eq!(
-            part(
-                &json!({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "BBB"}})
-            ),
-            json!({"type": "file", "file": {"filename": "attachment", "file_data": "data:application/pdf;base64,BBB"}})
-        );
+        assert!(context_note(&None).is_none());
+    }
 
-        let messages =
-            turn(&[json!({"role": "user", "content": [{"type": "text", "text": "hello"}]})]);
-        assert_eq!(messages[0]["role"], "system");
+    /// Overflow is cut a whole turn at a time, and the first message stays.
+    #[test]
+    fn the_oldest_turns_go_first() {
+        use super::trim;
+        let mut messages: Vec<_> = std::iter::once(json!({"role":"user","content":"first"}))
+            .chain((0..70).map(|i| json!({"role": if i % 2 == 0 { "assistant" } else { "user" }, "content": i})))
+            .collect();
+        trim(&mut messages);
+        assert!(messages.len() <= 60);
+        assert_eq!(messages[0]["content"], "first");
         assert_eq!(messages[1]["role"], "user");
-        assert_eq!(messages[1]["content"][0]["text"], "hello");
+    }
+
+    /// Text can arrive as a string or as a list of blocks; both read back the
+    /// same way.
+    #[test]
+    fn the_answer_reads_from_either_shape() {
+        assert_eq!(text_of(&json!({ "content": "  hello  " })), "hello");
+        assert_eq!(
+            text_of(&json!({ "content": [{ "type": "text", "text": "a" }, { "type": "text", "text": "b" }] })),
+            "a\nb"
+        );
+        assert_eq!(text_of(&json!({})), "");
     }
 }
