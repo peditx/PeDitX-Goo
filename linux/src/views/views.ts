@@ -5,6 +5,7 @@
 import { h, svg, clear, dot } from "./dom";
 import { ICONS } from "./icons";
 import { Ticker } from "./ticker";
+import { Bridge } from "../core/bridge";
 import { State, type AgentTask } from "../core/state";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { createMiniBot, pruneMiniBots } from "../character/minibots";
@@ -375,10 +376,60 @@ function buildSettings(actions: ViewActions): ViewHost {
     h("button", { onclick: () => actions.setAutoClose(s) }, `${s}s`),
   );
   const backendBadge = h("span", { class: "status-badge" });
+  const feedback = h("div", { style: "font-size:11px;padding:2px 0 0 2px" });
+  const urlField = h("input", {
+    type: "text",
+    placeholder: "http://192.168.1.1:8765/v1",
+    spellcheck: "false",
+    autocomplete: "off",
+    style: "flex:1 1 auto;min-width:0;background:#1E2024;color:#ECEDEF;"
+      + "border:1px solid #32353B;border-radius:8px;padding:3px 8px;font-size:11.5px;",
+  }) as HTMLInputElement;
+  urlField.addEventListener("change", () => {
+    State.settings.backendUrl = urlField.value.trim();
+    void Bridge.saveSettings(State.settings);
+    State.notify();
+  });
+
+  const testBtn = h("button", {
+    class: "link-btn",
+    style: "color:#8e939c;font-size:11.5px;cursor:pointer",
+    text: "Test",
+  });
+  testBtn.addEventListener("click", () => {
+    State.settings.backendUrl = urlField.value.trim();
+    void Bridge.saveSettings(State.settings);
+    clear(feedback);
+    feedback.append(h("div", { style: "color:#9a9fa8", text: "Contacting the endpoint…" }));
+    void Bridge.gooModels()
+      .then((list) => {
+        if (!State.settings.model && list.length) {
+          State.settings.model = list[0];
+          void Bridge.saveSettings(State.settings);
+        }
+        clear(feedback);
+        feedback.append(h("div", {
+          style: "color:#22C55E",
+          text: list.length ? `Connected — ${list.length} model(s).` : "Connected — no models listed.",
+        }));
+      })
+      .catch((err: unknown) => {
+        clear(feedback);
+        feedback.append(h("div", {
+          style: "color:#F4505E",
+          text: String(err).replace(/^Error:\s*/, ""),
+        }));
+      });
+  });
 
   const rows = h(
     "div",
     { class: "settings-rows" },
+    // The endpoint itself, here rather than only in the Settings window: an
+    // address gets retyped often enough, and it is not a secret.
+    h("div", { class: "settings-row" },
+      backendBadge, h("span", { text: "URL" }), urlField, testBtn),
+    feedback,
     h("div", { class: "settings-row" }, soundSwitch, h("span", { text: "Sound" }), volume),
     h(
       "div",
@@ -419,6 +470,7 @@ function buildSettings(actions: ViewActions): ViewHost {
       volume.style.opacity = s.soundEnabled ? "1" : "0.4";
       autoLabel.textContent = `Auto-close · ${Math.round(s.autoCloseInterval)}s`;
       segButtons.forEach((b, i) => b.classList.toggle("on", s.autoCloseInterval === [10, 15, 30][i]));
+      if (document.activeElement !== urlField) urlField.value = s.backendUrl;
       clear(backendBadge);
       backendBadge.append(
         dot(s.backendUrl.trim() ? "#22C55E" : "#F4505E", 6),
