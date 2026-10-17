@@ -278,54 +278,7 @@ function whiteFill(
   x.restore();
 }
 
-function drawHandL(x: CanvasRenderingContext2D, hw: number, hh: number, p: Pose) {
-  const k = p.handL;
-  if (k <= 0.01) return;
-  const hb = hh * 2;
-  const r = hb * 0.15 * k;
-  const rx = lerp(-hw * 0.35, -hw - hb * 0.22, k);
-  let ry = lerp(hh * 0.85, hh * 0.62, k);
-  if (p.wave >= 0) ry += Math.sin(p.wave * 6) * hb * 0.02;
-  x.save();
-  x.translate(rx, ry);
-  const circ = new Path2D();
-  circ.ellipse(0, 0, r, r, 0, 0, Math.PI * 2);
-  whiteFill(x, circ, r, -r, -r, r);
-  x.strokeStyle = "rgba(0,0,0,0.08)";
-  x.lineWidth = 0.8;
-  x.stroke(circ);
-  x.restore();
-}
 
-function drawHandR(x: CanvasRenderingContext2D, hw: number, hh: number, p: Pose) {
-  const k = p.handR;
-  if (k <= 0.01) return;
-  const hb = hh * 2;
-  const L = hb * 0.4 * k;
-  const T2 = hb * 0.22 * k;
-  let rx = lerp(hw * 0.35, hw + hb * 0.2, k);
-  let ry = lerp(hh * 0.85, hh * 0.2, k);
-  let ang = -0.61;
-  if (p.wave >= 0) {
-    const w = p.wave * 2 * Math.PI * 2.5;
-    ang += Math.sin(w) * 0.21;
-    ry += Math.sin(w + 0.8) * hb * 0.04;
-    rx += Math.cos(w) * hb * 0.015;
-  }
-  x.save();
-  x.translate(rx, ry);
-  x.rotate(ang);
-  const g = x.createLinearGradient(L / 2, -T2 / 2, -L / 2, T2 / 2);
-  g.addColorStop(0, "rgb(74,81,94)");
-  g.addColorStop(1, "rgb(28,32,39)");
-  rr(x, -L / 2, -T2 / 2, L, T2, T2 / 2);
-  x.fillStyle = g;
-  x.fill();
-  x.strokeStyle = "rgba(0,0,0,0.08)";
-  x.lineWidth = 0.8;
-  x.stroke();
-  x.restore();
-}
 
 function drawGoo(x: CanvasRenderingContext2D, p: Pose) {
   const hh = p.hb / 2;
@@ -353,9 +306,6 @@ function drawGoo(x: CanvasRenderingContext2D, p: Pose) {
   x.translate(p.x, p.y);
   x.rotate(p.tilt);
   x.scale(p.sx, p.sy);
-
-  drawHandL(x, hw, hh, p);
-  drawHandR(x, hw, hh, p);
 
   const body = gooPath(hw, hh);
   whiteFill(x, body, hw * 0.6, -hh, -hw * 0.6, hh);
