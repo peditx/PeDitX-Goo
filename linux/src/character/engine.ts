@@ -661,7 +661,6 @@ export class BotEngine {
 
     this.drawEyes(x, R);
     if (this.morph > 0.05) this.drawMouth(x, body, R);
-    if (this.morph <= 0.5) 
     x.restore();
 
     if (this.badge && this.badgeS > 0.01 && this.morph < 0.25) {

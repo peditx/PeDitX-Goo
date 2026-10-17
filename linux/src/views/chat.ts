@@ -11,7 +11,8 @@ import type { ViewHost } from "./views";
 
 let nextId = 1;
 
-function bubble(message: ChatMessage): HTMLElement {
+/** One message, as the island draws it. Shared with the drop view. */
+export function bubble(message: ChatMessage): HTMLElement {
   if (message.role === "user") {
     return h(
       "div",

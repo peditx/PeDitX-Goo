@@ -893,6 +893,49 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* ── Drop zone ──────────────────────────────────────────────────────────── */
 
+/* ── Drop view: the zone, and the conversation it is feeding ─────────────── */
+
+.drop-split {
+  display: flex;
+  gap: 12px;
+  height: 100%;
+  align-items: stretch;
+}
+
+.drop-split > .drop-card {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.drop-history {
+  flex: 0 0 240px;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 14px 16px;
+  background: var(--card-flat);
+  border-radius: 20px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+/* Nothing said yet — the drop zone gets the whole card, as before. */
+.drop-history:empty {
+  display: none;
+}
+
+.drop-history .chat-row.user {
+  padding-left: 24px;
+}
+
+.drop-history .bubble,
+.drop-history .reply {
+  font-size: 11.5px;
+}
+
 .drop-card {
   background: var(--card-flat);
   border: 0;
