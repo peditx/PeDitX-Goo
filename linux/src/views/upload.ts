@@ -6,7 +6,6 @@
 
 import { h, clear } from "./dom";
 import { State } from "../core/state";
-import { bubble } from "./chat";
 import type { ViewActions, ViewHost } from "./views";
 
 /** Dashed rounded rect drawn as SVG so the dashes can march like on macOS. */
@@ -42,25 +41,12 @@ export function buildUpload(): ViewHost {
     frame,
     h("div", { class: "drop-body" }, title, tags),
   );
-  // The right half is empty otherwise, and the thing you just asked is the
-  // reason you are dropping a file. Hidden entirely when nothing has been said.
-  const history = h("div", { class: "drop-history" });
-  const el = h("div", { class: "view" }, h("div", { class: "drop-split" }, card, history));
-
-  let rendered = "";
+  const el = h("div", { class: "view" }, card);
 
   return {
     el,
     sync() {
       card.classList.toggle("over", State.fileDragOver);
-
-      const tail = State.chatHistory.slice(-4);
-      const key = tail.map((m) => `${m.id}:${m.content.length}`).join("|");
-      if (key === rendered) return;
-      rendered = key;
-      clear(history);
-      for (const message of tail) history.append(bubble(message));
-      if (history.childElementCount) history.scrollTop = history.scrollHeight;
     },
   };
 }

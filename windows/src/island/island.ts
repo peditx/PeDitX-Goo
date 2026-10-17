@@ -2,7 +2,7 @@
 // Mirrors IslandRootView.swift + IslandWindowController.swift.
 
 import { Tracked, Spring, clamp } from "../core/anim";
-import { Bridge, IS_TAURI, onDragDrop, onEvent, turnsOf } from "../core/bridge";
+import { Bridge, IS_TAURI, onDragDrop, onEvent, titleOf, turnsOf } from "../core/bridge";
 import {
   EXPANDED_CORNER, EXPANDED_W, NOTCH_W, PANEL_H, PANEL_W,
   ROUNDED_CORNER, VIEW_LAYOUTS, botGlowColor, botGlowOpacity, botPosition, chatPromptHeight,
@@ -104,15 +104,22 @@ export class Island {
       this.dirty = true;
       this.ensureRunning();
     });
-    // The transcript is Rust's and the full-screen window writes to it too —
+    // The sessions are Rust's and the full-screen window writes to them too —
     // a question asked there, a New chat, or a session switch all land here.
     void onEvent("chat-changed", () => {
-      void Bridge.chatHistory().then((raw) => {
-        if (!raw) return;
-        State.chatHistory = turnsOf(raw).map((t, i) => ({
+      void Bridge.sessionList().then((st) => {
+        if (!st) return;
+        const active = st.sessions.find((s) => s.id === st.active);
+        State.chatHistory = turnsOf(active?.messages ?? []).map((t, i) => ({
           id: i + 1,
           role: t.role,
           content: t.content,
+        }));
+        State.sessions = st.sessions.map((s) => ({
+          id: s.id,
+          title: titleOf(s.messages),
+          active: s.id === st.active,
+          count: turnsOf(s.messages).length,
         }));
         State.notify();
         if (State.view === "prompt") this.animateGeometry(false);
@@ -382,7 +389,8 @@ export class Island {
     State.droppedFile = { name, path };
     State.promptContext = { kind: "file", name, path };
     State.chatHistory = [];
-    void Bridge.chatReset();
+    // A dropped file opens a fresh conversation; the old one stays in the list.
+    void Bridge.sessionNew();
 
     UploadSeq.performDrop(State.uploadDuration);
     this.uploadTens = 0;

@@ -129,8 +129,9 @@ function buildOverview(actions: ViewActions): ViewHost {
   );
   const left = card(null, leftBody, jump);
 
-  // Right side: chat history + Goo logo button to open full-screen chat
-  const historyEl = h("div", { class: "overview-history" });
+  // Right side: the conversation list — every session, the live one marked —
+  // with the Goo button that opens the full-screen window on it.
+  const sessionsEl = h("div", { class: "overview-sessions" });
   const gooBtn = h(
     "button",
     {
@@ -140,7 +141,7 @@ function buildOverview(actions: ViewActions): ViewHost {
     },
     svg(ICONS.goo, 18),
   );
-  const right = card(null, h("div", { class: "overview-right" }, historyEl, gooBtn));
+  const right = card(null, h("div", { class: "overview-right" }, sessionsEl, gooBtn));
 
   const el = h("div", { class: "view overview" },
     h("div", { class: "left" }, left),
@@ -151,7 +152,7 @@ function buildOverview(actions: ViewActions): ViewHost {
   let lastFocus: string | null = null;
   let mode: "ticker" | "card" | null = null;
   let cardKey = "";
-  let lastHistoryKey: string | null = null;
+  let sessionsKey: string | null = null;
 
   // The left card before anything has been said: where this island is pointed.
   const statusDot = h("i", { class: "status-dot" });
@@ -165,37 +166,37 @@ function buildOverview(actions: ViewActions): ViewHost {
     ),
   );
 
-  function renderHistory() {
-    const history = State.chatHistory;
-    const historyKey = history.map((m) => `${m.id}:${m.role}:${m.content.slice(0, 30)}`).join("|");
-    if (historyKey === lastHistoryKey) return;
-    lastHistoryKey = historyKey;
+  function renderSessions() {
+    const key = State.sessions.map((s) => `${s.id}:${s.title}:${s.active ? 1 : 0}:${s.count}`).join("|");
+    if (key === sessionsKey) return;
+    sessionsKey = key;
 
-    clear(historyEl);
-    if (history.length === 0) {
-      historyEl.append(
+    clear(sessionsEl);
+    if (State.sessions.length === 0) {
+      sessionsEl.append(
         h("div", { class: "overview-empty", style: "display:flex;align-items:center;justify-content:center;height:100%;color:var(--dim-3);font:400 12px var(--font)" },
-          "No conversation yet"
+          "No conversations yet"
         )
       );
       return;
     }
 
-    // Show last 4 messages
-    const recent = history.slice(-4);
-    for (const msg of recent) {
-      const row = h("div", { class: `overview-msg ${msg.role === "user" ? "user" : ""}` });
-      const bubble = h("div", { class: "overview-bubble", text: msg.content, dir: "auto" });
-      if (msg.role === "user") {
-        row.style.justifyContent = "flex-end";
-        row.append(bubble);
-      } else {
-        row.append(bubble);
-      }
-      historyEl.append(row);
+    for (const s of State.sessions) {
+      const row = h(
+        "div",
+        {
+          class: `session-row${s.active ? " on" : ""}`,
+          title: "Open this conversation",
+          onclick: () => {
+            actions.blip();
+            void Bridge.sessionSelect(s.id);
+          },
+        },
+        h("span", { class: "session-title", text: s.title, dir: "auto" }),
+        h("span", { class: "session-count", text: String(s.count) }),
+      );
+      sessionsEl.append(row);
     }
-    // Scroll to bottom
-    historyEl.scrollTop = historyEl.scrollHeight;
   }
 
   return {
@@ -248,8 +249,8 @@ function buildOverview(actions: ViewActions): ViewHost {
 
       jump.style.display = detailOpen ? "none" : "";
 
-      // Render chat history on right side
-      renderHistory();
+      // The conversation list on the right side
+      renderSessions();
     },
   };
 }

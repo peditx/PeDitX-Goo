@@ -1,16 +1,22 @@
 // Full-screen chat — a normal window, unlike the island.
 //
-// The transcript lives here rather than in Rust: the window renders it anyway,
-// and a stateless history keeps one fewer thing to keep in sync. The token
-// never reaches this file; Rust signs the request.
+// The sessions are Rust's, next to the island's: this window is a view of the
+// same store, one tab per conversation. A New chat, a switch or a question
+// asked in the island all land in the same list. The token never reaches this
+// file; Rust signs the request.
 //
-// The window is a workspace of sessions — one tab per conversation, switchable,
-// kept in memory while the window exists. Nothing here is persisted: a restart
-// starts from one empty tab (ponytail: hand sessions to settings.rs when a
-// conversation has to survive the app).
+// Nothing is persisted across restarts — sessions live as long as the app
+// (ponytail: hand them to settings.rs when one has to survive that).
 
 import "./goo.css";
-import { Bridge, onEvent, turnsOf, type ChatTurn } from "../core/bridge";
+import {
+  Bridge,
+  onEvent,
+  titleOf,
+  turnsOf,
+  type ChatTurn,
+  type SessionState,
+} from "../core/bridge";
 import { h, clear, svg } from "../views/dom";
 import { ICONS } from "../views/icons";
 
@@ -18,15 +24,15 @@ const root = document.getElementById("goo-root")!;
 
 interface Session {
   id: number;
-  /** First thing asked here — the tab's label. Empty = nothing said yet. */
+  /** First thing asked here — the tab's label. */
   title: string;
   turns: ChatTurn[];
 }
 
-let nextId = 1;
-const newSession = (): Session => ({ id: nextId++, title: "", turns: [] });
+/** Local fallback for the plain-browser preview, where Rust is not there. */
+let nextLocalId = 1;
 
-let sessions: Session[] = [newSession()];
+let sessions: Session[] = [{ id: nextLocalId++, title: "New chat", turns: [] }];
 let active: Session = sessions[0];
 let streaming = false;
 let configured = false;
@@ -72,79 +78,94 @@ root.replaceChildren(header, tabs, transcript, footer);
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
 
+/** Rebuilds the tabs and the transcript from the store — the single refresh. */
+function applyState(st: SessionState) {
+  sessions = st.sessions.map((s) => ({
+    id: s.id,
+    title: titleOf(s.messages),
+    turns: turnsOf(s.messages),
+  }));
+  active = sessions.find((s) => s.id === st.active) ?? sessions[0];
+  renderTabs();
+  renderTranscript();
+}
+
+async function syncSessions() {
+  const st = await Bridge.sessionList();
+  if (st) applyState(st);
+  else {
+    // Plain-browser preview: the tabs live here alone.
+    renderTabs();
+    renderTranscript();
+  }
+}
+
 function renderTabs() {
   clear(tabs);
   for (const s of sessions) {
     const tab = h(
       "div",
-      { class: `tab${s === active ? " on" : ""}`, title: s.title || "New chat" },
-      h("span", { class: "tab-label", text: s.title || "New chat", dir: "auto" }),
+      { class: `tab${s === active ? " on" : ""}`, title: s.title },
+      h("span", { class: "tab-label", text: s.title, dir: "auto" }),
     );
     tab.addEventListener("click", () => {
       if (streaming || s === active) return;
-      active = s;
       // The selected session becomes the shared transcript: the island's next
       // question lands here, and its history shows this conversation.
-      void Bridge.chatLoad(sessionMessages(s));
-      renderTabs();
-      renderTranscript();
-      input.focus();
+      void switchTo(s);
     });
     if (sessions.length > 1) {
       const close = h("span", { class: "tab-close", text: "×", title: "Close" });
       close.addEventListener("click", (e) => {
         e.stopPropagation();
-        closeSession(s);
+        void closeSession(s);
       });
       tab.append(close);
     }
     tabs.append(tab);
   }
   const add = h("div", { class: "tab add", title: "New chat", text: "+" });
-  add.addEventListener("click", () => openNewSession());
+  add.addEventListener("click", () => void openNewSession());
   tabs.append(add);
 }
 
-function openNewSession() {
-  if (streaming) return;
-  active = newSession();
-  sessions.push(active);
-  // The island shares this transcript — a new chat here is a new chat there.
-  void Bridge.chatLoad([]);
-  renderTabs();
-  renderTranscript();
+async function switchTo(s: Session) {
+  const st = await Bridge.sessionSelect(s.id);
+  if (st) applyState(st);
+  else {
+    active = s;
+    renderTabs();
+    renderTranscript();
+  }
   input.focus();
 }
 
-function closeSession(s: Session) {
-  if (streaming || sessions.length === 1) return;
-  const i = sessions.indexOf(s);
-  sessions.splice(i, 1);
-  if (s === active) {
-    active = sessions[Math.max(0, i - 1)];
-    void Bridge.chatLoad(sessionMessages(active));
+async function openNewSession() {
+  if (streaming) return;
+  // `force`: even an empty active session gets a tab the user can see — the
+  // island's own New chat keeps passiveness so blanks do not pile up there.
+  const st = await Bridge.sessionNew(true);
+  if (st) applyState(st);
+  else {
+    active = { id: nextLocalId++, title: "New chat", turns: [] };
+    sessions.push(active);
+    renderTabs();
     renderTranscript();
   }
-  renderTabs();
+  input.focus();
 }
 
-function sessionMessages(s: Session): unknown[] {
-  return s.turns.map((t) => ({ role: t.role, content: t.content }));
-}
-
-const titleOf = (text: string) => (text.length > 28 ? `${text.slice(0, 28)}…` : text);
-
-/**
- * The one active conversation lives in Rust, next to the island's. Every
- * window reads it from there — this window's tabs, the island's transcript
- * and the overview's history are views of the same thing.
- */
-async function refreshActive() {
-  const raw = await Bridge.chatHistory();
-  if (raw) active.turns = turnsOf(raw);
-  if (!active.title && active.turns.length > 0) {
-    active.title = titleOf(active.turns[0].content);
+async function closeSession(s: Session) {
+  if (streaming || sessions.length === 1) return;
+  const st = await Bridge.sessionClose(s.id);
+  if (st) {
+    applyState(st);
+    return;
   }
+  const i = sessions.indexOf(s);
+  if (i < 0) return;
+  sessions.splice(i, 1);
+  if (s === active) active = sessions[Math.max(0, i - 1)];
   renderTabs();
   renderTranscript();
 }
@@ -230,7 +251,7 @@ async function submit() {
   clearEmpty();
 
   if (!active.title) {
-    active.title = titleOf(text);
+    active.title = titleOf([{ role: "user", content: text }]);
     renderTabs();
   }
   active.turns.push({ role: "user", content: text });
@@ -261,10 +282,10 @@ async function submit() {
     notice(message);
   } finally {
     setBusy(false);
-    // A chat-changed that landed mid-turn re-reads the stored transcript now.
+    // A chat-changed that landed mid-turn re-reads the store now.
     if (pendingRefresh) {
       pendingRefresh = false;
-      void refreshActive();
+      void syncSessions();
     }
     input.focus();
   }
@@ -294,19 +315,19 @@ async function boot() {
   configured = (await Bridge.gooConfigured()) ?? false;
   statusDot.style.background = configured ? "#22c55e" : "#f4505e";
   statusText.textContent = configured ? "ready" : "not configured";
-  // Opens on whatever the island was last talking about — one conversation.
-  await refreshActive();
+  // Opens on the shared store: tabs, active session, all of it.
+  await syncSessions();
   input.focus();
 }
 
 void boot();
 
-// The island asked something, reset, or selected another session: this window
-// follows the shared transcript. While a turn is running, apply it after.
+// The island asked something, started a session, or selected another: this
+// window follows the store. While a turn is running, apply it after.
 void onEvent("chat-changed", () => {
   if (streaming) {
     pendingRefresh = true;
     return;
   }
-  void refreshActive();
+  void syncSessions();
 });

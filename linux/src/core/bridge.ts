@@ -70,11 +70,12 @@ export const Bridge = {
   /** One chat turn, handed to PeDitX-AI whole. */
   chatSend: (query: string, context: ChatContext | null) =>
     callOrThrow<{ text: string }>("chat_send", { query, context }),
-  chatReset: () => call<void>("chat_reset"),
-  /** The shared transcript, raw, as the Rust side holds it. */
-  chatHistory: () => call<unknown[]>("chat_history"),
-  /** Makes `messages` the shared transcript — how a session tab is selected. */
-  chatLoad: (messages: unknown[]) => call<void>("chat_load", { messages }),
+  /** Every conversation, the active one marked — the single store. */
+  sessionList: () => call<SessionState>("session_list"),
+  /** A fresh conversation; `force` makes one even when the active is empty. */
+  sessionNew: (force = false) => call<SessionState>("session_new", { force }),
+  sessionSelect: (id: number) => call<SessionState>("session_select", { id }),
+  sessionClose: (id: number) => call<SessionState>("session_close", { id }),
 
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
@@ -151,6 +152,19 @@ export function turnsOf(raw: unknown): ChatTurn[] {
     if (text) out.push({ role: m.role as ChatTurn["role"], content: text });
   }
   return out;
+}
+
+/** A session's label: its first question, the way a chat list names a chat. */
+export function titleOf(messages: unknown): string {
+  const first = turnsOf(messages).find((t) => t.role === "user");
+  if (!first) return "New chat";
+  return first.content.length > 28 ? `${first.content.slice(0, 28)}…` : first.content;
+}
+
+/** What `session_list` (and the mutating session calls) return. */
+export interface SessionState {
+  active: number;
+  sessions: { id: number; messages: unknown[] }[];
 }
 
 /** Same as `call`, but surfaces the error so the UI can show what went wrong. */

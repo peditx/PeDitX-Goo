@@ -499,7 +499,7 @@ body {
   }
 }
 
-/* ── Overview right side: chat history + Goo button ─────────────────────── */
+/* ── Overview right side: the conversation list + Goo button ────────────── */
 
 .overview-right {
   position: relative;
@@ -508,46 +508,62 @@ body {
   flex-direction: column;
 }
 
-.overview-history {
+.overview-sessions {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 10px 12px 8px;
+  padding: 10px 12px 44px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
-.overview-msg {
+.session-row {
   display: flex;
-  max-width: 85%;
-}
-
-.overview-msg.user {
-  align-self: flex-end;
-}
-
-.overview-bubble {
-  font: 400 11px var(--font);
-  color: var(--ink-2);
-  white-space: pre-wrap;
-  padding: 4px 8px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
   border-radius: 10px;
-  user-select: text;
-  line-height: 1.4;
+  border: 1px solid transparent;
+  background: var(--card-flat);
+  cursor: default;
+  transition: background 0.15s, border-color 0.15s;
 }
 
-.overview-msg.user .overview-bubble {
-  background: rgba(255, 255, 255, 0.13);
-  border-bottom-right-radius: 2px;
-}
-
-.overview-msg:not(.user) .overview-bubble {
+.session-row:hover {
   background: rgba(255, 255, 255, 0.07);
-  color: #b0b5be;
-  border-bottom-left-radius: 2px;
+}
+
+.session-row.on {
+  border-color: rgba(47, 107, 255, 0.55);
+  background: rgba(47, 107, 255, 0.14);
+}
+
+.session-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: 500 12px var(--font);
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-row.on .session-title {
+  color: var(--ink);
+}
+
+.session-count {
+  flex: 0 0 auto;
+  font: 500 10.5px var(--font);
+  color: var(--dim-3);
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-variant-numeric: tabular-nums;
 }
 
 .overview-empty {
@@ -990,48 +1006,7 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* ── Drop zone ──────────────────────────────────────────────────────────── */
 
-/* ── Drop view: the zone, and the conversation it is feeding ─────────────── */
-
-.drop-split {
-  display: flex;
-  gap: 12px;
-  height: 100%;
-  align-items: stretch;
-}
-
-.drop-split > .drop-card {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.drop-history {
-  flex: 0 0 240px;
-  min-width: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  gap: 6px;
-  padding: 14px 16px;
-  background: var(--card-flat);
-  border-radius: 20px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
-}
-
-/* Nothing said yet — the drop zone gets the whole card, as before. */
-.drop-history:empty {
-  display: none;
-}
-
-.drop-history .chat-row.user {
-  padding-left: 24px;
-}
-
-.drop-history .bubble,
-.drop-history .reply {
-  font-size: 11.5px;
-}
+/* ── Drop view: the zone itself ─────────────────────────────────────────── */
 
 .drop-card {
   background: var(--card-flat);

@@ -160,25 +160,36 @@ async fn chat_send(
     out
 }
 
+/// Every conversation, the active one marked — the island's history, the
+/// overview's session list and the full-screen window's tabs all read this.
 #[tauri::command]
-fn chat_reset(app: AppHandle, chat: State<Chat>) {
-    chat.reset();
-    let _ = app.emit("chat-changed", ());
+fn session_list(chat: State<Chat>) -> Value {
+    chat.list()
 }
 
-/// The shared transcript as the UI draws it: both windows read this instead of
-/// keeping a copy of their own.
+/// A fresh conversation. `force` makes one even when the active is empty
+/// (the full-screen window's "+"); the island passes false.
 #[tauri::command]
-fn chat_history(chat: State<Chat>) -> Vec<Value> {
-    chat.snapshot()
+fn session_new(app: AppHandle, chat: State<Chat>, force: bool) -> Value {
+    let state = chat.new_session(force);
+    let _ = app.emit("chat-changed", ());
+    state
 }
 
-/// A session switch in the full-screen window: the conversation it selects
-/// becomes the one the island shows and the next question lands in.
+/// Selecting a session anywhere: the island's transcript, the overview's list
+/// and the next question all follow it.
 #[tauri::command]
-fn chat_load(app: AppHandle, chat: State<Chat>, messages: Vec<Value>) {
-    chat.replace(messages);
+fn session_select(app: AppHandle, chat: State<Chat>, id: u64) -> Value {
+    let state = chat.select_session(id);
     let _ = app.emit("chat-changed", ());
+    state
+}
+
+#[tauri::command]
+fn session_close(app: AppHandle, chat: State<Chat>, id: u64) -> Value {
+    let state = chat.close_session(id);
+    let _ = app.emit("chat-changed", ());
+    state
 }
 
 /// One turn for the full-screen window, on the shared transcript. The answer
@@ -361,9 +372,10 @@ pub fn run() {
             quit_app,
             log_line,
             chat_send,
-            chat_reset,
-            chat_history,
-            chat_load,
+            session_list,
+            session_new,
+            session_select,
+            session_close,
             goo_send,
             goo_configured,
             agent_status,

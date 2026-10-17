@@ -119,15 +119,15 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
 
   send.addEventListener("click", () => void submit());
 
-  // A fresh session: the transcript, the file context and the Rust-side copy
-  // all go together — half a history is worse than none.
+  // A fresh session: the transcript, the file context and the store all move
+  // together — the conversation just left stays in the overview's list.
   newBtn.addEventListener("click", () => {
     if (sending) return;
     State.chatHistory = [];
     State.droppedFile = null;
     State.promptContext = null;
     State.stateOverride = null;
-    void Bridge.chatReset();
+    void Bridge.sessionNew();
     Sound.play("blip");
     State.notify();
     onHeightChange();

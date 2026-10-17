@@ -25,6 +25,14 @@ export interface ChatMessage {
   content: string;
 }
 
+/** One row of the conversation list the overview shows. */
+export interface SessionInfo {
+  id: number;
+  title: string;
+  active: boolean;
+  count: number;
+}
+
 export type PromptContext =
   | { kind: "window"; appName: string; title: string; url?: string }
   | { kind: "file"; name: string; path?: string };
@@ -109,6 +117,8 @@ class AppState {
   noteMessage: string | null = null;
   searchResult: SearchResult | null = null;
   chatHistory: ChatMessage[] = [];
+  /** Every conversation, refreshed from Rust on chat-changed. */
+  sessions: SessionInfo[] = [];
 
   lastActivity = performance.now();
 
