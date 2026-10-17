@@ -375,30 +375,14 @@ function buildSettings(actions: ViewActions): ViewHost {
     h("button", { onclick: () => actions.setAutoClose(s) }, `${s}s`),
   );
   const backendBadge = h("span", { class: "status-badge" });
-  const feedback = h("div", { style: "font-size:11px;padding:2px 0 0 2px" });
-  const urlField = h("input", {
-    type: "text",
-    placeholder: "http://127.0.0.1:8765",
-    spellcheck: "false",
-    autocomplete: "off",
-    style: "flex:1 1 auto;min-width:0;background:#1E2024;color:#ECEDEF;"
-      + "border:1px solid #32353B;border-radius:8px;padding:3px 8px;font-size:11.5px;",
-  }) as HTMLInputElement;
-  const commitUrl = () => {
-    State.settings.backendUrl = urlField.value.trim();
-    void Bridge.saveSettings(State.settings);
-    State.notify();
-    clear(feedback);
-    feedback.append(h("div", { style: "color:#22C55E", text: "Address saved." }));
-  };
-  urlField.addEventListener("change", commitUrl);
-  // Enter commits without having to hunt for somewhere else to click first.
-  urlField.addEventListener("keydown", (e: KeyboardEvent) => {
-    if (e.key === "Enter") {
-      commitUrl();
-      urlField.blur();
-    }
+  // Read-only here. Typing an address needs a keyboard, and the island is
+  // non-activating: taking focus to type is what made this panel stick open.
+  // The Settings window is a normal window and does that job properly.
+  const addressText = h("span", {
+    style: "flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;"
+      + "white-space:nowrap;color:#8e939c;font-size:11.5px",
   });
+  const feedback = h("div", { style: "font-size:11px;padding:0 2px;min-height:14px" });
 
   const testBtn = h("button", {
     class: "link-btn",
@@ -406,8 +390,6 @@ function buildSettings(actions: ViewActions): ViewHost {
     text: "Test",
   });
   testBtn.addEventListener("click", () => {
-    State.settings.backendUrl = urlField.value.trim();
-    void Bridge.saveSettings(State.settings);
     clear(feedback);
     feedback.append(h("div", { style: "color:#9a9fa8", text: "Contacting PeDitX-AI…" }));
     void Bridge.agentStatus()
@@ -427,13 +409,20 @@ function buildSettings(actions: ViewActions): ViewHost {
       });
   });
 
+  const settingsBtn = h("button", {
+    class: "link-btn",
+    style: "color:#8e939c;font-size:11.5px;cursor:pointer",
+    text: "Edit…",
+    onclick: () => actions.openSettingsWindow(),
+  });
+
   const rows = h(
     "div",
     { class: "settings-rows" },
-    // Where PeDitX-AI is listening. The one thing Goo needs to know; the
-    // endpoint, the key and the model are PeDitX-AI's own.
+    // Where PeDitX-AI is listening — shown, not typed. Three rows, so the
+    // panel fits the strip without scrolling.
     h("div", { class: "settings-row" },
-      backendBadge, h("span", { text: "PeDitX-AI" }), urlField, testBtn),
+      backendBadge, h("span", { text: "PeDitX-AI" }), addressText, testBtn, settingsBtn),
     feedback,
     h("div", { class: "settings-row" }, soundSwitch, h("span", { text: "Sound" }), volume),
     h(
@@ -443,33 +432,13 @@ function buildSettings(actions: ViewActions): ViewHost {
       autoLabel,
       h("div", { class: "seg" }, ...segButtons),
     ),
-    // Where this island is pointed. The row is the way in, because that is
-    // where somebody looks when they want to change it.
-    h(
-      "div",
-      {
-        class: "settings-row",
-        style: "cursor:pointer",
-        title: "Open Settings",
-        onclick: () => actions.openSettingsWindow(),
-      },
-      h("div", { class: "grow" }),
-      h("span", {
-        class: "link-btn",
-        style: "color:#8e939c;font-size:11.5px;cursor:pointer",
-        text: "Open Settings…",
-      }),
-    ),
   );
 
   const el = h("div", { class: "view" },
-    card(null, h("div", { class: "stack", style: "padding:14px 16px 14px 84px" }, rows)));
+    card(null, h("div", { class: "stack", style: "padding:18px 16px 18px 84px" }, rows)));
 
   return {
     el,
-    focus() {
-      urlField.focus();
-    },
     sync() {
       const s = State.settings;
       soundSwitch.classList.toggle("on", s.soundEnabled);
@@ -477,7 +446,8 @@ function buildSettings(actions: ViewActions): ViewHost {
       volume.style.opacity = s.soundEnabled ? "1" : "0.4";
       autoLabel.textContent = `Auto-close · ${Math.round(s.autoCloseInterval)}s`;
       segButtons.forEach((b, i) => b.classList.toggle("on", s.autoCloseInterval === [10, 15, 30][i]));
-      if (document.activeElement !== urlField) urlField.value = s.backendUrl;
+      addressText.textContent = s.backendUrl.trim() || "not set";
+      addressText.title = s.backendUrl;
       clear(backendBadge);
       backendBadge.append(
         dot(s.backendUrl.trim() ? "#22C55E" : "#F4505E", 6),
