@@ -90,7 +90,7 @@ pub fn load() -> Settings {
             if url.ends_with("/v1") || url.ends_with("/chat/completions") {
                 settings.backend_url = crate::backend::DEFAULT_AGENT.into();
             }
-            Ok(settings)
+            settings
         }
         Err(_) => Settings::default(),
     }

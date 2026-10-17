@@ -135,7 +135,7 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
-// ── Chat and secrets ─────────────────────────────────────────────────────────
+// ── Chat ─────────────────────────────────────────────────────────────────────
 
 /// One island turn. The address is read fresh, so a change in Settings applies
 /// to the next message; everything else about the answer is PeDitX-AI's.
