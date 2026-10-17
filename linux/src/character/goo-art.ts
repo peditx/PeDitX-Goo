@@ -24,23 +24,26 @@ export const BODY_ORIGIN = { x: 202.9, y: 207.2 };
 export const BODY_HALF = { x: 100.1, y: 116.2 };
 
 export const FUR = {
-  inner: "#E6C9FF", // radial gradient, cx 38% cy 28% r 75%
-  mid: "#B98BE8",
-  outer: "#8051B8",
-  tuft: "#A77AD5",
-  sparkle: "#D8B9F5",
-  leg: "#A77AD5",
-  foot: "#9567C5",
-  claw: "#C9A2EF",
-  eye: "#30233C",
-  mouth: "#56365E",
+  inner: "#4A515E",
+  mid: "#2C323C",
+  outer: "#171B22",
+  // The fluff is lighter than the body on purpose: it is what keeps the
+  // silhouette readable against the island's own dark panel.
+  tuft: "#7A8496",
+  sparkle: "#98A2B3",
+  leg: "#3A4150",
+  foot: "#2A3040",
+  claw: "#6E7788",
+  eye: "#FFFFFF",
+  pupil: "#12161D",
+  mouth: "#AEB7C6",
   blush: "#F6A7D5",
   cheek: "#F35AA8",
   heart: "#FFB7DB",
   heartDeep: "#F35AA8",
   heartEdge: "#F18ABD",
   heartShine: "#FFE5F2",
-  shadow: "#76509B",
+  shadow: "#000000",
 };
 
 // ── Parts ────────────────────────────────────────────────────────────────────
@@ -116,7 +119,7 @@ export const SHADOW = { x: 201, y: 399, rx: 105, ry: 17 };
 // whatever R the island is using.
 
 /** Eye centres, in body-half-width units from the origin. */
-export const EYES = { dx: 0.345, dy: -0.192, rx: 0.11, ry: 0.15 };
+export const EYES = { dx: 0.35, dy: -0.1, rx: 0.3, ry: 0.3 };
 /** Blush, same units. */
 export const BLUSH = { dx: 0.558, dy: 0.038, rx: 0.14, ry: 0.08 };
 /** Mouth, same units: an arc `hw` either side of (dx, dy), bowing down `bow`. */

@@ -303,8 +303,8 @@ export class UploadCanvas {
 
     // Body.
     const bg = ctx.createLinearGradient(rx * 0.7, -ry * 0.9, -rx * 0.8, ry * 0.9);
-    bg.addColorStop(0, "#F2F6FF");
-    bg.addColorStop(1, "#B9CCF2");
+    bg.addColorStop(0, "#4A515E");
+    bg.addColorStop(1, "#1C2027");
     ctx.fillStyle = bg;
     ctx.fill();
 
@@ -451,13 +451,18 @@ export class UploadCanvas {
 
 // ── Eye shapes ──────────────────────────────────────────────────────────────
 
-const INK = "#0E0F12";
+const INK = "#FFFFFF";
+const PUPIL = "#12161D";
 
 function drawEye(ctx: CanvasRenderingContext2D, shape: UploadEyeShape, w: number, h: number) {
   switch (shape) {
     case "pill":
       ctx.fillStyle = INK;
       rr(ctx, -w / 2, -h / 2, w, h, w / 2);
+      ctx.fill();
+      ctx.fillStyle = PUPIL;
+      ctx.beginPath();
+      ctx.ellipse(w * 0.1, -h * 0.08, w * 0.28, h * 0.3, 0, 0, Math.PI * 2);
       ctx.fill();
       break;
 

@@ -62,8 +62,8 @@ interface Particle {
 
 // ── Constants (GooConst / PISTES.goo) ─────────────────────────────────────
 
-const BASE_TOP: RGB = [0.949, 0.965, 1]; // #F2F6FF
-const BASE_BOTTOM: RGB = [0.725, 0.8, 0.949]; // #B9CCF2
+const BASE_TOP: RGB = [0.4, 0.44, 0.5]; // #66707F
+const BASE_BOTTOM: RGB = [0.173, 0.196, 0.235]; // #2C323C
 
 const C = {
   idle: [0.902, 0.914, 0.933] as RGB,
@@ -85,7 +85,7 @@ const base = {
 };
 
 export const BOT_STATES: Record<BotStateName, BotStateCfg> = {
-  idle: { ...base, color: C.idle, tint: 0, eye: "pill", badge: null },
+  idle: { ...base, color: C.idle, tint: 0, eye: "pill", badge: null, breathes: true },
   working: { ...base, color: C.working, tint: 0.72, eye: "pill", badge: { kind: "dots", color: C.working } },
   thinking: { ...base, color: C.thinking, tint: 0.72, eye: "pill", badge: { kind: "dots", color: C.thinking }, look: [0.55, 0.55] },
   searching: { ...base, color: C.searching, tint: 0.72, eye: "pill", badge: { kind: "dots", color: C.searching }, scans: true },
@@ -581,6 +581,12 @@ export class BotEngine {
       this.lastAmbient = n;
       if (this.cfg.zz) this.emit("z", 1);
       if (!this.isMini && this.cfg.sweat && Math.random() < 0.5) this.emit("sweat", 1);
+      // Nothing drives the island any more — the session hooks that used to are
+      // gone — so idle gets a life of its own instead of only blinking.
+      if (!this.isMini && this.state === "idle" && Math.random() < 0.09) {
+        const moods: BotEmoteName[] = ["happy", "wink", "surprised", "proud"];
+        this.triggerEmote(moods[Math.floor(Math.random() * moods.length)], 1.7);
+      }
     }
 
     for (const p of this.particles) p.age += dt;
@@ -651,6 +657,7 @@ export class BotEngine {
     x.scale(this.sx, this.sy);
 
     const body = this.bodyPath(rx, ry, R);
+    this.drawAntenna(x, R, ry);
     this.drawTufts(x, R);
     this.drawBody(x, body, R, rx, ry);
     this.drawLimbs(x, R);
@@ -769,6 +776,40 @@ export class BotEngine {
     });
   }
 
+  /**
+   * A thin stalk off the crown with a lit tip, leaning the way the body just
+   * moved. Drawn before the body so its base hides behind the fluff.
+   */
+  private drawAntenna(x: CanvasRenderingContext2D, R: number, ry: number) {
+    // Tall enough to clear the fur — the longest tuft reaches about -1.6R, so
+    // anything shorter disappears into it.
+    const len = R * 0.95;
+    const baseY = -ry * 0.9;
+    const lean = -(this.ox * 1.6 + this.tilt * 0.9) * len;
+    const tipX = Math.max(-R, Math.min(R, lean));
+    const tipY = baseY - len;
+
+    x.save();
+    x.strokeStyle = "rgba(219,228,244,0.95)";
+    x.lineWidth = Math.max(2.5, R * 0.058);
+    x.lineCap = "round";
+    x.beginPath();
+    x.moveTo(0, baseY);
+    x.quadraticCurveTo(tipX * 0.35, baseY - len * 0.6, tipX, tipY);
+    x.stroke();
+
+    const r = R * 0.16;
+    const glow = x.createRadialGradient(tipX, tipY, 0, tipX, tipY, r * 2.2);
+    glow.addColorStop(0, "rgba(255,255,255,0.98)");
+    glow.addColorStop(0.4, "rgba(120,170,255,0.92)");
+    glow.addColorStop(1, "rgba(120,170,255,0)");
+    x.fillStyle = glow;
+    x.beginPath();
+    x.arc(tipX, tipY, r * 2.2, 0, Math.PI * 2);
+    x.fill();
+    x.restore();
+  }
+
   private drawBody(x: CanvasRenderingContext2D, body: Path2D, R: number, rx: number, ry: number) {
     if (this.bodyColor) {
       // Mini bots: flat solid fill — no gradient, no reflection, no highlight
@@ -818,90 +859,36 @@ export class BotEngine {
    * eyes. The engine still owns what moves them: `es` blinks them, `yaw`/
    * `pitch` follow the cursor, and `cfg.eye` picks a shape per state.
    */
+  /**
+   * Big googly eyes: a white ball with a dark pupil inside, the pupil riding
+   * where it is looking. The ball shrinks as it blinks and vanishes when shut —
+   * a light eye on a dark body leaves nothing to see. Whatever shape a state
+   * asks for becomes the pupil, so heart, star and spiral still work.
+   */
   private drawEyes(x: CanvasRenderingContext2D, R: number) {
     const shape: EyeShape = this.eyeOverride ?? this.cfg.eye;
 
     GOO.withArt(x, R, () => {
       const E = GOO.EYES;
-      // One non-finite tween value here would silently erase the whole face: a
-      // path built from NaN fills nothing and raises nothing.
       const es = Number.isFinite(this.es) && this.es > 0 ? this.es : 1;
-      const closed = shape === "closed" || shape === "flat" || shape === "line";
+      const shut = shape === "closed" || shape === "flat" || shape === "line";
       let rxS = 1;
       let ryS = es;
-      if (closed) ryS = 0.06;
-      else if (shape === "wide") { rxS = 1.25; ryS = Math.max(ryS, 1.15); }
-      else if (shape === "tired") ryS = Math.min(ryS, 0.45);
-      else if (shape === "dot") { rxS = 0.55; ryS = 0.55; }
+      if (shut) ryS = 0.06;
+      else if (shape === "wide") { rxS = 1.12; ryS = Math.max(ryS, 1.1); }
+      else if (shape === "tired") ryS = Math.min(ryS, 0.5);
+      else if (shape === "dot") { rxS = 0.7; ryS = 0.7; }
 
-      // Blink and cursor tracking, in SVG units.
       const off = 18;
       const ox = Number.isFinite(this.yaw) ? this.yaw * off : 0;
       const oy = Number.isFinite(this.pitch) ? this.pitch * off * 0.6 : 0;
       const halfW = GOO.BODY_HALF.x;
       const O = GOO.BODY_ORIGIN;
 
-      x.fillStyle = GOO.FUR.eye;
-      x.strokeStyle = GOO.FUR.eye;
-      for (const sd of [-1, 1]) {
-        const ex = O.x + sd * E.dx * halfW + ox;
-        const ey = O.y + E.dy * halfW + oy;
-        const w = E.rx * halfW * rxS;
-        const h = E.ry * halfW * ryS;
-        if (h < 1) continue;
-        if (shape === "happy" && ryS > 0.6) {
-          x.lineWidth = 5;
-          x.lineCap = "round";
-          x.beginPath();
-          x.arc(ex, ey + h * 0.35, w, Math.PI * 1.12, Math.PI * 1.88);
-          x.stroke();
-        } else if (shape === "heart" || shape === "star") {
-          x.beginPath();
-          if (shape === "heart") {
-            const hr = w * 1.15;
-            x.moveTo(ex, ey + hr * 0.75);
-            x.bezierCurveTo(ex - hr * 1.3, ey - hr * 0.1, ex - hr * 0.55, ey - hr * 0.95, ex, ey - hr * 0.3);
-            x.bezierCurveTo(ex + hr * 0.55, ey - hr * 0.95, ex + hr * 1.3, ey - hr * 0.1, ex, ey + hr * 0.75);
-          } else {
-            for (let i = 0; i < 10; i++) {
-              const a = (Math.PI / 5) * i - Math.PI / 2;
-              const rr = i % 2 === 0 ? w * 1.1 : w * 0.46;
-              const px = ex + Math.cos(a) * rr;
-              const py = ey + Math.sin(a) * rr;
-              if (i === 0) x.moveTo(px, py);
-              else x.lineTo(px, py);
-            }
-            x.closePath();
-          }
-          x.fill();
-        } else if (shape === "spiral") {
-          x.lineWidth = 3;
-          x.beginPath();
-          for (let a = 0; a < Math.PI * 4; a += 0.2) {
-            const rr = (a / (Math.PI * 4)) * w;
-            const px = ex + Math.cos(a) * rr;
-            const py = ey + Math.sin(a) * rr;
-            if (a === 0) x.moveTo(px, py);
-            else x.lineTo(px, py);
-          }
-          x.stroke();
-        } else {
-          x.beginPath();
-          x.ellipse(ex, ey, w, h, 0, 0, Math.PI * 2);
-          x.fill();
-          // The white catchlight, offset with the eye.
-          x.fillStyle = "#fff";
-          x.beginPath();
-          x.arc(ex + w * 0.27, ey - h * 0.33, Math.max(1.5, w * 0.32), 0, Math.PI * 2);
-          x.fill();
-          x.fillStyle = GOO.FUR.eye;
-        }
-      }
-
-      // Blush.
+      // Blush first: it sits behind the eyes.
       const blushA = Math.max(0.7, this.blush, this.tint * 0.5) * (1 - this.morph);
       if (blushA > 0.01) {
-        x.globalAlpha = 0.8 * blushA;
+        x.globalAlpha = 0.75 * blushA;
         x.fillStyle = GOO.FUR.blush;
         for (const sd of [-1, 1]) {
           x.beginPath();
@@ -913,22 +900,86 @@ export class BotEngine {
         x.globalAlpha = 1;
       }
 
-      // The smile. `closed` and `tired` pull it flat; the rest keep it.
+      if (ryS < 0.35) return; // shut: nothing to show on a dark body
+
+      for (const sd of [-1, 1]) {
+        const ex = O.x + sd * E.dx * halfW + ox;
+        const ey = O.y + E.dy * halfW + oy;
+        const w = E.rx * halfW * rxS;
+        const h = E.ry * halfW * ryS;
+
+        x.fillStyle = GOO.FUR.eye;
+        x.beginPath();
+        x.ellipse(ex, ey, w, h, 0, 0, Math.PI * 2);
+        x.fill();
+
+        const px = ex + ox * 0.5;
+        const py = ey + oy * 0.5;
+        const pw = w * 0.46;
+        const ph = h * 0.46;
+        x.fillStyle = GOO.FUR.pupil;
+        x.strokeStyle = GOO.FUR.pupil;
+        if (shape === "happy") {
+          x.lineWidth = Math.max(3, h * 0.24);
+          x.lineCap = "round";
+          x.beginPath();
+          x.arc(px, py + h * 0.3, w * 0.62, Math.PI * 1.14, Math.PI * 1.86);
+          x.stroke();
+        } else if (shape === "heart" || shape === "star") {
+          x.beginPath();
+          if (shape === "heart") {
+            const hr = pw * 1.25;
+            x.moveTo(px, py + hr * 0.8);
+            x.bezierCurveTo(px - hr * 1.3, py - hr * 0.1, px - hr * 0.55, py - hr * 0.95, px, py - hr * 0.3);
+            x.bezierCurveTo(px + hr * 0.55, py - hr * 0.95, px + hr * 1.3, py - hr * 0.1, px, py + hr * 0.8);
+          } else {
+            for (let i = 0; i < 10; i++) {
+              const a = (Math.PI / 5) * i - Math.PI / 2;
+              const rr = i % 2 === 0 ? pw * 1.2 : pw * 0.5;
+              const qx = px + Math.cos(a) * rr;
+              const qy = py + Math.sin(a) * rr;
+              if (i === 0) x.moveTo(qx, qy); else x.lineTo(qx, qy);
+            }
+            x.closePath();
+          }
+          x.fill();
+        } else if (shape === "spiral") {
+          x.lineWidth = 2.5;
+          x.beginPath();
+          for (let a = 0; a < Math.PI * 4; a += 0.2) {
+            const rr = (a / (Math.PI * 4)) * pw;
+            const qx = px + Math.cos(a) * rr;
+            const qy = py + Math.sin(a) * rr;
+            if (a === 0) x.moveTo(qx, qy); else x.lineTo(qx, qy);
+          }
+          x.stroke();
+        } else {
+          x.beginPath();
+          x.ellipse(px, py, pw, ph, 0, 0, Math.PI * 2);
+          x.fill();
+          x.fillStyle = "#FFFFFF";
+          x.beginPath();
+          x.arc(px - pw * 0.3, py - ph * 0.34, Math.max(1.2, pw * 0.3), 0, Math.PI * 2);
+          x.fill();
+          x.fillStyle = GOO.FUR.pupil;
+        }
+      }
+
+      // The smile, under the eyes.
       const M = GOO.MOUTH;
-      const smileY = closed || shape === "tired" ? 0.35 : 1;
+      const flat = shut || shape === "tired";
       const mx = O.x + M.dx * halfW + ox;
       const my = O.y + M.dy * halfW + oy;
       x.strokeStyle = GOO.FUR.mouth;
-      x.lineWidth = 4;
+      x.lineWidth = 5;
       x.lineCap = "round";
       x.beginPath();
       x.moveTo(mx - M.hw * halfW, my);
-      x.quadraticCurveTo(mx, my + M.bow * halfW * smileY, mx + M.hw * halfW, my);
+      x.quadraticCurveTo(mx, my + M.bow * halfW * (flat ? 0.3 : 1), mx + M.hw * halfW, my);
       x.stroke();
     });
   }
 
-  /** Mailbox slot: dark pill cut into the box face, with rim and lip highlights. */
   private drawMouth(x: CanvasRenderingContext2D, body: Path2D, R: number) {
     const m = this.morph;
     const hW = R * 1.8 * m;

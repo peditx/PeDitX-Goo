@@ -270,8 +270,8 @@ function whiteFill(
   x0: number, y0: number, x1: number, y1: number,
 ) {
   const g = x.createLinearGradient(x0, y0, x1, y1);
-  g.addColorStop(0, "rgb(242,246,255)");
-  g.addColorStop(1, "rgb(185,204,242)");
+  g.addColorStop(0, "rgb(74,81,94)");
+  g.addColorStop(1, "rgb(28,32,39)");
   x.save();
   x.fillStyle = g;
   x.fill(path);
@@ -316,8 +316,8 @@ function drawHandR(x: CanvasRenderingContext2D, hw: number, hh: number, p: Pose)
   x.translate(rx, ry);
   x.rotate(ang);
   const g = x.createLinearGradient(L / 2, -T2 / 2, -L / 2, T2 / 2);
-  g.addColorStop(0, "rgb(242,246,255)");
-  g.addColorStop(1, "rgb(185,204,242)");
+  g.addColorStop(0, "rgb(74,81,94)");
+  g.addColorStop(1, "rgb(28,32,39)");
   rr(x, -L / 2, -T2 / 2, L, T2, T2 / 2);
   x.fillStyle = g;
   x.fill();
@@ -374,8 +374,8 @@ function drawGoo(x: CanvasRenderingContext2D, p: Pose) {
   // Eyes
   x.save();
   x.clip(body);
-  x.fillStyle = "#16171A";
-  x.strokeStyle = "#16171A";
+  x.fillStyle = "#FFFFFF";
+  x.strokeStyle = "#FFFFFF";
   const er = p.hb * 0.06;
   const sp = p.hb * 0.19;
   const lx = p.lookX * hw * 0.42;
@@ -400,6 +400,11 @@ function drawGoo(x: CanvasRenderingContext2D, p: Pose) {
       x.beginPath();
       x.arc(0, 0, er, 0, Math.PI * 2);
       x.fill();
+      x.fillStyle = "#12161D";
+      x.beginPath();
+      x.arc(er * 0.16, -er * 0.1, er * 0.44, 0, Math.PI * 2);
+      x.fill();
+      x.fillStyle = "#FFFFFF";
     }
     x.restore();
   }

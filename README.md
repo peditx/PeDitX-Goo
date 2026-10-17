@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="linux/src-tauri/icons/icon.png" width="112" alt="PeDitX-Goo icon">
+
 # PeDitX-Goo
 
 **A small animated companion that sits at the top of your screen and chats with
