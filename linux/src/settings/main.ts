@@ -10,9 +10,28 @@ let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
 
 const root = document.getElementById("settings-root")!;
+const saveFeedback = h("div", { "aria-live": "polite", role: "status" });
+let lastCheckedUrl = "";
 
 async function save() {
-  await Bridge.saveSettings(settings);
+  try {
+    await Bridge.saveSettings({ ...settings });
+    clear(saveFeedback);
+    return true;
+  } catch (err) {
+    const boot = await Bridge.boot();
+    if (boot) {
+      settings = { ...settings, ...boot.settings };
+      for (const read of READERS) read();
+    }
+    clear(saveFeedback);
+    const message = String(err).replace(/^Error:\s*/, "");
+    saveFeedback.append(h("div", {
+      class: "notice err",
+      text: message.startsWith("Settings were saved,") ? message : `Settings were not saved: ${message}`,
+    }));
+    return false;
+  }
 }
 
 // ── Reusable bits ─────────────────────────────────────────────────────────────
@@ -70,19 +89,58 @@ function backendSection(): HTMLElement {
         + `  ·  access: ${s.mode}`
         + `  ·  key: ${s.hasKey ? "saved" : "none"}`,
     }));
+    readout.append(h("div", {
+      text: `Work steps: ${s.maxToolSteps === 0 ? "unlimited" : s.maxToolSteps}`
+        + " (set in PeDitX-AI Settings)",
+    }));
   }
 
   function refresh() {
     const url = settings.backendUrl.trim();
-    dot.style.background = url ? "#22c55e" : "#f4505e";
-    state.textContent = url ? `PeDitX-AI at ${url}` : "No address set.";
     if (document.activeElement !== urlField) urlField.value = settings.backendUrl;
+    if (url !== lastCheckedUrl) {
+      lastCheckedUrl = url;
+      void checkConnection();
+    }
   }
 
-  async function commitUrl() {
+  async function checkConnection() {
+    const url = settings.backendUrl.trim();
+    if (!url) {
+      dot.style.background = "#f4505e";
+      state.textContent = "No address set.";
+      clear(readout);
+      return false;
+    }
+    dot.style.background = "#d5a500";
+    state.textContent = `Checking PeDitX-AI at ${url}…`;
+    try {
+      const status = await Bridge.agentStatus();
+      if (settings.backendUrl.trim() !== url) return false;
+      dot.style.background = "#22c55e";
+      state.textContent = `Connected to PeDitX-AI at ${url}`;
+      paintReadout(status);
+      return true;
+    } catch {
+      if (settings.backendUrl.trim() !== url) return false;
+      dot.style.background = "#f4505e";
+      state.textContent = `Could not reach PeDitX-AI at ${url}.`;
+      clear(readout);
+      return false;
+    }
+  }
+
+  let commitPending: Promise<boolean> | null = null;
+  async function commitUrl(): Promise<boolean> {
+    if (commitPending) return commitPending;
+    commitPending = (async () => {
     settings.backendUrl = urlField.value.trim();
-    await save();
-    refresh();
+      if (!(await save())) return false;
+      refresh();
+      return true;
+    })();
+    try { return await commitPending; }
+    finally { commitPending = null; }
   }
 
   urlField.addEventListener("change", () => void commitUrl());
@@ -94,13 +152,17 @@ function backendSection(): HTMLElement {
   });
 
   testBtn.addEventListener("click", async () => {
-    await commitUrl();
+    if (!(await commitUrl())) return;
     note("", "Contacting PeDitX-AI…");
     try {
       const s = await Bridge.agentStatus();
       paintReadout(s);
+      dot.style.background = "#22c55e";
+      state.textContent = `Connected to PeDitX-AI at ${settings.backendUrl}`;
       note("ok", "PeDitX-AI answered.");
     } catch (err) {
+      dot.style.background = "#f4505e";
+      state.textContent = `Could not reach PeDitX-AI at ${settings.backendUrl}.`;
       paintReadout(null);
       note("err", String(err).replace(/^Error:\s*/, ""));
     }
@@ -108,6 +170,7 @@ function backendSection(): HTMLElement {
 
   openChat.addEventListener("click", () => void Bridge.openGooWindow());
 
+  READERS.push(refresh);
   void refresh();
 
   return h(
@@ -137,9 +200,11 @@ function generalSection(): HTMLElement {
     type: "range", min: "0", max: "0.2", step: "0.005",
     value: String(settings.soundVolume),
   }) as HTMLInputElement;
+  let volumeSaveTimer = 0;
   volume.addEventListener("input", () => {
     settings.soundVolume = Number(volume.value);
-    void save();
+    window.clearTimeout(volumeSaveTimer);
+    volumeSaveTimer = window.setTimeout(() => void save(), 180);
   });
 
   const autoClose = h("input", {
@@ -174,13 +239,31 @@ function generalSection(): HTMLElement {
     void save();
   });
 
+  const soundToggle = toggle(settings.soundEnabled, (v) => { settings.soundEnabled = v; void save(); });
+  const autostartToggle = toggle(settings.autostart, (v) => { settings.autostart = v; void save(); });
+  const hotkeyToggle = toggle(settings.hotkeyEnabled, (v) => { settings.hotkeyEnabled = v; void save(); });
+  const syncToggle = (el: HTMLElement, on: boolean) => {
+    el.classList.toggle("on", on);
+    el.setAttribute("aria-pressed", String(on));
+  };
+  const refresh = () => {
+    volume.value = String(settings.soundVolume);
+    autoClose.value = String(Math.round(settings.autoCloseInterval));
+    screen.value = settings.screen;
+    hotkey.value = settings.hotkey;
+    syncToggle(soundToggle, settings.soundEnabled);
+    syncToggle(autostartToggle, settings.autostart);
+    syncToggle(hotkeyToggle, settings.hotkeyEnabled);
+  };
+  READERS.push(refresh);
+
   return h(
     "section",
     {},
     h("h2", {}, h("span", { text: "General" })),
     h("div", { class: "row" },
       h("label", { text: "Sound" }),
-      toggle(settings.soundEnabled, (v) => { settings.soundEnabled = v; void save(); }),
+      soundToggle,
       volume,
     ),
     h("div", { class: "row" },
@@ -194,11 +277,11 @@ function generalSection(): HTMLElement {
     ),
     h("div", { class: "row" },
       h("label", { text: "Launch at startup" }),
-      toggle(settings.autostart, (v) => { settings.autostart = v; void save(); }),
+      autostartToggle,
     ),
     h("div", { class: "row" },
       h("label", { text: "Show island with shortcut" }),
-      toggle(settings.hotkeyEnabled, (v) => { settings.hotkeyEnabled = v; void save(); }),
+      hotkeyToggle,
       hotkey,
       h("span", { class: "hint", text: "PeDitX-Goo holds these keys while on" }),
     ),
@@ -220,6 +303,7 @@ async function main() {
   clear(root);
   root.append(
     h("h1", {}, h("span", { text: "PeDitX-Goo" }), h("span", { class: "version", text: version })),
+    saveFeedback,
     backendSection(),
     generalSection(),
     h("div", {
@@ -231,6 +315,10 @@ async function main() {
   void onEvent<Settings>("settings-changed", (s) => {
     settings = { ...settings, ...s };
     for (const read of READERS) read();
+  });
+  void onEvent<string>("settings-error", (message) => {
+    clear(saveFeedback);
+    saveFeedback.append(h("div", { class: "notice err", text: message }));
   });
 }
 

@@ -68,6 +68,22 @@ fn gnome_session() -> bool {
     desktop.contains("gnome") || desktop.contains("ubuntu") || desktop.contains("unity")
 }
 
+pub fn validate(settings: &Settings) -> Result<(), String> {
+    if !settings.hotkey_enabled {
+        return Ok(());
+    }
+    if !gnome_session() {
+        return Err("Global shortcuts currently require a GNOME session; use the tray to open Goo on this desktop.".into());
+    }
+    if accel(&settings.hotkey).is_none() {
+        return Err(format!("{} is not a valid shortcut. Try Ctrl+Shift+N.", settings.hotkey));
+    }
+    if gsettings(&["get", SCHEMA, "custom-keybindings"]).is_none() {
+        return Err("GNOME's shortcut service is unavailable. The shortcut was not changed.".into());
+    }
+    Ok(())
+}
+
 /// "Ctrl+Shift+N" → `<Control><Shift>n`, the form gsettings stores.
 /// Needs at least one modifier: a bare key would be stolen from every app.
 fn accel(src: &str) -> Option<String> {
@@ -158,69 +174,60 @@ fn grabber_running() -> bool {
 
 /// Make the desktop hold exactly the shortcut the settings ask for — or none.
 /// Reads before writing, so an unchanged setup costs two `gsettings` calls.
-pub fn apply(settings: &Settings) {
+pub fn apply(settings: &Settings) -> Result<(), String> {
     if !gnome_session() {
         if settings.hotkey_enabled {
-            log::line("hotkey: no GNOME session — open the island from the tray instead");
+            return Err("Global shortcuts currently require a GNOME session.".into());
         }
-        return;
+        return Ok(());
     }
-    let Some(raw) = gsettings(&["get", SCHEMA, "custom-keybindings"]) else {
-        log::line("hotkey: gsettings is unavailable — open the island from the tray instead");
-        return;
-    };
+    let raw = gsettings(&["get", SCHEMA, "custom-keybindings"])
+        .ok_or_else(|| "GNOME's shortcut service is unavailable.".to_string())?;
     let mut list = paths(&raw);
     let present = list.iter().any(|p| p == PATH);
 
     let wanted = match (settings.hotkey_enabled, accel(&settings.hotkey)) {
         (false, _) => None,
-        (true, None) => {
-            log::line(format!(
-                "hotkey: \"{}\" is not a shortcut (try Ctrl+Shift+N)",
-                settings.hotkey
-            ));
-            None
-        }
+        (true, None) => return Err(format!("{} is not a valid shortcut.", settings.hotkey)),
         (true, Some(a)) => Some(a),
     };
 
     match wanted {
         None => {
             if !present {
-                return;
+                return Ok(());
             }
             list.retain(|p| p != PATH);
-            gsettings(&["set", SCHEMA, "custom-keybindings", &list_variant(&list)]);
+            gsettings(&["set", SCHEMA, "custom-keybindings", &list_variant(&list)])
+                .ok_or_else(|| "GNOME could not release the shortcut.".to_string())?;
             for key in ["name", "binding", "command"] {
-                gsettings(&["reset", &item(), key]);
+                gsettings(&["reset", &item(), key])
+                    .ok_or_else(|| format!("GNOME could not reset shortcut {key}."))?;
             }
             log::line("hotkey: released");
         }
         Some(accel) => {
-            let Some(exe) = our_exe() else {
-                log::line("hotkey: cannot find our own binary");
-                return;
-            };
+            let exe = our_exe().ok_or_else(|| "Could not locate the PeDitX-Goo application.".to_string())?;
             let held = item_get("binding") == Some(format!("'{accel}'"))
                 && item_get("command") == Some(format!("'{exe}'"));
             if present && held {
-                return;
+                return Ok(());
             }
             // Keys first, then the list: gsd-media-keys reads the keys the
             // moment a path appears, and dies if they are not there yet.
             if !grabber_running() {
-                log::line(
-                    "hotkey: GNOME's key grabber is not running — log out and back in for it to fire",
-                );
+                return Err("GNOME's shortcut service is not running. Sign out and back in, then try again.".into());
             }
-            item_set("name", OURS);
-            item_set("binding", &accel);
-            item_set("command", &exe);
+            if !item_set("name", OURS) || !item_set("binding", &accel) || !item_set("command", &exe) {
+                return Err("GNOME could not save the shortcut.".into());
+            }
             if !present {
                 list.push(PATH.to_string());
-                gsettings(&["set", SCHEMA, "custom-keybindings", &list_variant(&list)]);
+                gsettings(&["set", SCHEMA, "custom-keybindings", &list_variant(&list)])
+                    .ok_or_else(|| "GNOME could not register the shortcut.".to_string())?;
             }
             log::line(format!("hotkey: {accel} runs {exe}"));
         }
     }
+    Ok(())
 }

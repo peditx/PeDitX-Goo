@@ -92,12 +92,17 @@ fn run(app: AppHandle, rx: Receiver<(bool, String)>, initial: (bool, String)) {
                         held = true;
                         log::line(format!("hotkey: {} held by the system", next.1));
                     }
-                    Err(err) => log::line(format!("hotkey: RegisterHotKey failed: {err}")),
+                    Err(err) => {
+                        let message = format!("Could not register shortcut {}: {err}", next.1);
+                        log::line(format!("hotkey: {message}"));
+                        let _ = app.emit("settings-error", message);
+                    }
                 },
-                None => log::line(format!(
-                    "hotkey: \"{}\" is not a shortcut (try Ctrl+Shift+N)",
-                    next.1
-                )),
+                None => {
+                    let message = format!("{} is not a valid shortcut. Try Ctrl+Shift+N.", next.1);
+                    log::line(format!("hotkey: {message}"));
+                    let _ = app.emit("settings-error", message);
+                }
             }
         } else if current.0 {
             log::line("hotkey: released");
@@ -150,6 +155,13 @@ fn accel(src: &str) -> Option<(HOT_KEY_MODIFIERS, u32)> {
         return None;
     }
     Some((mods, vk?))
+}
+
+pub fn validate(settings: &Settings) -> Result<(), String> {
+    if settings.hotkey_enabled && accel(&settings.hotkey).is_none() {
+        return Err(format!("{} is not a valid shortcut. Try Ctrl+Shift+N.", settings.hotkey));
+    }
+    Ok(())
 }
 
 fn virtual_key(token: &str) -> Option<u32> {

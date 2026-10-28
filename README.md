@@ -54,7 +54,8 @@ connection*, done.
   open the full-screen window for a running conversation. Both are PeDitX-AI
   answering.
 - 🔧 **The agent runs, Goo narrates it** — when PeDitX-AI asks for a tool, Goo
-  shows it working and waits; up to eight steps, then the final wording.
+  shows it working and waits; the work-step limit follows PeDitX-AI's Settings,
+  including its unlimited option, then Goo shows the final wording.
 - 🔴 **It says when it failed** — PeDitX-AI not running, or a turn that did not
   land, turns the character red and shows the reason instead of swallowing it.
 - 📎 **Drop a file on it** — the character turns into a box and swallows it;

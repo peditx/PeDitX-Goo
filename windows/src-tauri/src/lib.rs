@@ -55,24 +55,38 @@ fn boot(app: AppHandle, shared: State<Shared>) -> BootInfo {
 }
 
 #[tauri::command]
-fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
+fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) -> Result<(), String> {
+    if !settings.sound_volume.is_finite() || !(0.0..=0.2).contains(&settings.sound_volume) {
+        return Err("Sound volume must be between 0 and 0.2.".into());
+    }
+    if !settings.auto_close_interval.is_finite()
+        || !(5.0..=120.0).contains(&settings.auto_close_interval)
+    {
+        return Err("Auto-close must be between 5 and 120 seconds.".into());
+    }
+    if !matches!(settings.screen.as_str(), "primary" | "cursor") {
+        return Err("Choose a valid display option.".into());
+    }
+    backend::validate_address(&settings.backend_url)?;
+    hotkey::validate(&settings)?;
+
     let (screen_changed, autostart_changed, hotkey_changed) = {
         let mut current = shared.settings.lock().unwrap();
         let screen_changed = current.screen != settings.screen;
         let autostart_changed = current.autostart != settings.autostart;
         let hotkey_changed = current.hotkey != settings.hotkey
             || current.hotkey_enabled != settings.hotkey_enabled;
+        settings::save(&settings).map_err(|err| format!("Settings could not be saved: {err}"))?;
         *current = settings.clone();
         (screen_changed, autostart_changed, hotkey_changed)
     };
-    if let Err(err) = settings::save(&settings) {
-        eprintln!("[peditx-goo] could not save settings: {err}");
-    }
+
+    let mut warnings = Vec::new();
     if autostart_changed {
         let manager = app.autolaunch();
         let result = if settings.autostart { manager.enable() } else { manager.disable() };
         if let Err(err) = result {
-            eprintln!("[peditx-goo] autostart: {err}");
+            warnings.push(format!("the startup setting could not be applied: {err}"));
         }
     }
     if screen_changed {
@@ -84,6 +98,11 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
     }
     // Keep the other window in step (island ⇄ settings window).
     let _ = app.emit("settings-changed", settings);
+    if warnings.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("Settings were saved, but {}", warnings.join("; ")))
+    }
 }
 
 /// Hidden island → shrink the window to the invisible wake strip and park the
@@ -214,8 +233,9 @@ async fn goo_send(
 /// The chat window's empty state. Says "yes" or "no", never which half is
 /// missing — the settings window is where that is worked out.
 #[tauri::command]
-fn goo_configured(shared: State<Shared>) -> bool {
-    backend::configured(&shared.settings.lock().unwrap().backend_url)
+async fn goo_configured(shared: State<'_, Shared>) -> bool {
+    let url = shared.settings.lock().unwrap().backend_url.clone();
+    backend::reachable(&url).await
 }
 
 /// PeDitX-AI's own view of itself: its endpoint, its model, its access mode.

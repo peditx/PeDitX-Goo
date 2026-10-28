@@ -7,7 +7,7 @@
 // which is the point. Settings only says where PeDitX-AI is listening.
 //
 // The loop below mirrors `web/index.html`'s `send()`: ask, run whatever tools
-// the answer asks for, ask again, up to eight times, then one tool-free turn
+// the answer asks for, obey PeDitX-AI's configured step limit, then one tool-free turn
 // for the final wording. One difference, marked where it happens: this side
 // cannot click a confirmation dialog, so `ask` mode denies instead of asking.
 
@@ -26,8 +26,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// One turn can run long — the model thinks, then works. Matched to the 600 s
 /// ceiling PeDitX-AI itself puts on an upstream request.
 const TURN_TIMEOUT: Duration = Duration::from_secs(600);
-/// Steps before Goo stops asking. The web UI uses 8; this mirrors it.
-const MAX_STEPS: usize = 8;
+/// Used only when talking to an older PeDitX-AI build without `max_tool_steps`.
+const DEFAULT_MAX_STEPS: usize = 128;
 
 /// The tools every access mode may still run. Same list as the web UI.
 const READ_ONLY: &[&str] = &[
@@ -55,6 +55,8 @@ pub struct AgentStatus {
     pub model: String,
     pub mode: String,
     pub has_key: bool,
+    /// Shared work-round limit from PeDitX-AI; zero means unlimited.
+    pub max_tool_steps: usize,
 }
 
 /// The address is user input, so only http(s) survives it. A trailing slash
@@ -68,6 +70,14 @@ fn base(raw: Option<&str>) -> Result<String, String> {
     if !(base.starts_with("http://") || base.starts_with("https://")) {
         return Err("PeDitX-AI address must start with http:// or https://.".into());
     }
+    let parsed = reqwest::Url::parse(base)
+        .map_err(|_| "PeDitX-AI address must be a complete web address.".to_string())?;
+    if parsed.host_str().is_none() || !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("PeDitX-AI address must include a host and must not contain credentials.".into());
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("PeDitX-AI address must not include a query or fragment.".into());
+    }
     Ok(base.to_string())
 }
 
@@ -77,10 +87,27 @@ pub fn configured(url: &str) -> bool {
     base(Some(url)).is_ok()
 }
 
+pub fn validate_address(url: &str) -> Result<(), String> {
+    if url.trim().is_empty() {
+        return Ok(());
+    }
+    base(Some(url)).map(|_| ())
+}
+
 fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(TURN_TIMEOUT)
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// Settings should report a dead local service quickly, not inherit the long
+/// per-turn timeout used while the model is working.
+fn status_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(4))
         .build()
         .map_err(|e| e.to_string())
 }
@@ -170,7 +197,7 @@ async fn get(
 /// reported as present or absent — never its value, which is not Goo's.
 pub async fn status(url: &str) -> Result<AgentStatus, String> {
     let base = base(Some(url))?;
-    let client = client()?;
+    let client = status_client()?;
     let token = token(&client, &base).await?;
     let config = get(&client, &base, &token, "/api/config").await?;
     let text = |key: &str| {
@@ -188,7 +215,16 @@ pub async fn status(url: &str) -> Result<AgentStatus, String> {
             .get("has_key")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        max_tool_steps: config
+            .get("max_tool_steps")
+            .and_then(Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok())
+            .unwrap_or(DEFAULT_MAX_STEPS),
     })
+}
+
+pub async fn reachable(url: &str) -> bool {
+    status(url).await.is_ok()
 }
 
 /// One `POST /api/chat`: PeDitX-AI prompts its own model with its own system
@@ -260,14 +296,23 @@ async fn run(base: &str, history: &mut Vec<Value>) -> Result<Value, String> {
     trim(history);
     let client = client()?;
     let token = token(&client, base).await?;
-    let mode = get(&client, base, &token, "/api/config")
-        .await
-        .ok()
-        .and_then(|c| c.get("mode").and_then(Value::as_str).map(str::to_string))
-        .unwrap_or_else(|| "full".into());
+    let config = get(&client, base, &token, "/api/config").await?;
+    let mode = config
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("observe")
+        .to_string();
+    // Zero is PeDitX-AI's explicit “unlimited” option. Older installations do
+    // not send the field, so they receive a generous compatibility default.
+    let max_steps = config
+        .get("max_tool_steps")
+        .and_then(Value::as_u64)
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or(DEFAULT_MAX_STEPS);
 
     let mut message = ask(&client, base, &token, history, false).await?;
-    for _ in 0..MAX_STEPS {
+    let mut steps = 0usize;
+    loop {
         history.push(message.clone());
         let calls = message
             .get("tool_calls")
@@ -285,14 +330,16 @@ async fn run(base: &str, history: &mut Vec<Value>) -> Result<Value, String> {
                 "content": result.to_string(),
             }));
         }
+        steps += 1;
+        if max_steps != 0 && steps >= max_steps {
+            // Leave the user's work and all tool results in the transcript,
+            // then ask the model to explain progress without starting more work.
+            let final_message = ask(&client, base, &token, history, true).await?;
+            history.push(final_message.clone());
+            return Ok(final_message);
+        }
         message = ask(&client, base, &token, history, false).await?;
     }
-
-    // Out of steps: ask once more with tools off so the user still gets prose.
-    history.push(message);
-    message = ask(&client, base, &token, history, true).await?;
-    history.push(message.clone());
-    Ok(message)
 }
 
 /** PeDitX-AI refuses more than 80 messages, so the oldest turns go first —

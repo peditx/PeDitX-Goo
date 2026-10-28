@@ -30,7 +30,7 @@ export interface BootInfo {
 export const Bridge = {
   boot: () => call<BootInfo>("boot"),
 
-  saveSettings: (settings: Settings) => call<void>("save_settings", { settings }),
+  saveSettings: (settings: Settings) => callOrThrow<void>("save_settings", { settings }),
 
   /** Shrink the window down to the invisible wake strip (hidden) or back to full. */
   setCollapsed: (collapsed: boolean) => call<void>("set_collapsed", { collapsed }),
@@ -63,7 +63,7 @@ export const Bridge = {
    */
   agentStatus: () => callOrThrow<AgentStatus>("agent_status"),
 
-  /** Writes to %LOCALAPPDATA%\PeDitX-Goo\goo.log, next to the Rust lines. */
+  /** Writes to $XDG_STATE_HOME/peditx-goo/goo.log, next to the Rust lines. */
   log: (message: string) => call<void>("log_line", { message }),
 
   // ── Chat, files, secrets ──────────────────────────────────────────────────
@@ -94,6 +94,7 @@ export interface AgentStatus {
   model: string;
   mode: string;
   hasKey: boolean;
+  maxToolSteps: number;
 }
 
 export interface DroppedFile {
