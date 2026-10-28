@@ -233,7 +233,7 @@ async fn goo_send(
 #[tauri::command]
 async fn goo_configured(shared: State<'_, Shared>) -> Result<bool, String> {
     let url = shared.settings.lock().unwrap().backend_url.clone();
-    backend::reachable(&url).await.map_err(|e| e.to_string())
+    Ok(backend::reachable(&url).await)
 }
 
 /// PeDitX-AI's own view of itself: its endpoint, its model, its access mode.
