@@ -231,9 +231,9 @@ async fn goo_send(
 /// The chat window's empty state. Says "yes" or "no", never which half is
 /// missing — the settings window is where that is worked out.
 #[tauri::command]
-async fn goo_configured(shared: State<'_, Shared>) -> bool {
+async fn goo_configured(shared: State<'_, Shared>) -> Result<bool, String> {
     let url = shared.settings.lock().unwrap().backend_url.clone();
-    backend::reachable(&url).await
+    backend::reachable(&url).await.map_err(|e| e.to_string())
 }
 
 /// PeDitX-AI's own view of itself: its endpoint, its model, its access mode.
